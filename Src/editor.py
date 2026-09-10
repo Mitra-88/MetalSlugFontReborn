@@ -1,3 +1,4 @@
+from enum import IntEnum
 from math import ceil, cos, radians, sin
 from pathlib import Path
 from time import time
@@ -6,12 +7,13 @@ from PIL import Image, ImageQt
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (QColor, QIcon, QKeySequence, QPen, QPixmap,
                            QShortcut)
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFormLayout,
-                               QFrame, QGraphicsItem, QGraphicsLineItem,
-                               QGraphicsPixmapItem, QGraphicsRectItem,
-                               QGraphicsScene, QGraphicsView, QGridLayout,
-                               QGroupBox, QHBoxLayout, QInputDialog, QLabel,
-                               QMenu, QMessageBox, QPushButton, QScrollArea,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
+                               QFormLayout, QFrame, QGraphicsItem,
+                               QGraphicsLineItem, QGraphicsPixmapItem,
+                               QGraphicsRectItem, QGraphicsScene,
+                               QGraphicsView, QGridLayout, QGroupBox,
+                               QHBoxLayout, QInputDialog, QLabel, QMenu,
+                               QMessageBox, QPushButton, QScrollArea,
                                QSlider, QSpinBox, QSplitter, QVBoxLayout,
                                QWidget)
 
@@ -45,16 +47,251 @@ LINE_SPACING_DEFAULT = 15
 LINE_SPACING_MAX = 200
 SNAP_GRID_DEFAULT = 10
 SNAP_GRID_MAX = 100
-SNAP_THRESHOLD_PX = 10
-SNAP_GUIDE_COLOR = "#ff00ae"
+SNAP_THRESHOLD_PX = 8
 SNAP_DISABLED_MODIFIER = Qt.KeyboardModifier.AltModifier
+
+SCALE_SNAP_TOLERANCE_PCT = 4
+ROTATE_SNAP_STEP = 45
+GUIDE_POOL_SIZE = 8
 
 NUDGE_STEP = 1
 NUDGE_BIG_STEP = 10
 
+SNAP_GUIDE_COLOR = "#ff00ae"
+SNAP_SPACING_GUIDE_COLOR = "#ff9500"
+
 GRID_LINE_COLOR = QColor(128, 128, 128, 60)
 CANVAS_FILL_COLOR = QColor(128, 128, 128, 28)
 GRID_MIN_SCREEN_PX = 7
+
+
+class GuideStyle(IntEnum):
+    EDGE = 0
+    CENTER = 1
+    SPACING = 2
+
+
+class _SnapCandidate:
+    __slots__ = ("delta", "coord", "guides")
+
+    def __init__(self, delta, coord, guides):
+        self.delta = delta
+        self.coord = coord
+        self.guides = guides
+
+
+class SnapEngine:
+    """Document-space snapping math for the Advanced editor.
+
+    All inputs and outputs are in canvas (document) coordinates; the
+    caller converts a screen-pixel tolerance into document space using
+    the current view zoom, so snapping feels identical at every zoom
+    level. Detection is deterministic: candidates are resolved by the
+    total order (|delta|, coordinate, delta) and statics are kept in
+    sorted tables, never raw set/dict iteration order.
+
+    Priority tiers per axis (first tier with a candidate wins):
+      1. other characters' edges         (edge-to-edge only)
+      2. other characters' centers       (center-to-center only)
+      3. canvas/artboard edges + center
+      4. equal-gap spacing between two statics (Figma-style)
+      5. fixed grid fallback (no guides)
+    """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Drop all per-drag state so every drag starts from a clean pass."""
+        self._statics = []
+        self._xs = None
+        self._ys = None
+        self._x_by_left = []
+        self._y_by_top = []
+
+    def is_ready(self):
+        return self._xs is not None
+
+    def set_statics(self, statics, canvas_w, canvas_h):
+        """Load the immutable snap sources for one drag gesture.
+
+        statics: iterable of (key, QRectF) for every visible, non-moving
+        character; key only breaks ties, coordinates drive detection.
+        """
+        self._statics = sorted(statics, key=lambda kv: kv[0])
+        self._canvas_w = float(canvas_w)
+        self._canvas_h = float(canvas_h)
+        xs_edges, xs_centers, ys_edges, ys_centers = [], [], [], []
+        for key, rect in self._statics:
+            xs_edges += [(rect.left(), key), (rect.right(), key)]
+            ys_edges += [(rect.top(), key), (rect.bottom(), key)]
+            xs_centers.append((rect.center().x(), key))
+            ys_centers.append((rect.center().y(), key))
+        self._xs = (sorted(xs_edges), sorted(xs_centers))
+        self._ys = (sorted(ys_edges), sorted(ys_centers))
+        self._x_by_left = sorted(self._statics, key=lambda kv: (kv[1].left(), kv[0]))
+        self._x_by_right = sorted(self._statics, key=lambda kv: (kv[1].right(), kv[0]))
+        self._y_by_top = sorted(self._statics, key=lambda kv: (kv[1].top(), kv[0]))
+        self._y_by_bottom = sorted(self._statics, key=lambda kv: (kv[1].bottom(), kv[0]))
+
+    def find_snap(self, box, threshold, grid):
+        """Return (dx, dy, guides) for the moving bounding box.
+
+        guides is a list of (axis, coord, GuideStyle) for the snaps that
+        are actually active this frame; empty when only the grid matched.
+        """
+        dx, guides_x = self._snap_one_axis(box, threshold, grid, True)
+        dy, guides_y = self._snap_one_axis(box, threshold, grid, False)
+        return dx, dy, guides_x + guides_y
+
+    def _snap_one_axis(self, box, threshold, grid, horizontal):
+        tiers = (
+            lambda: self._tier_char_edges(box, threshold, horizontal),
+            lambda: self._tier_char_centers(box, threshold, horizontal),
+            lambda: self._tier_canvas(box, threshold, horizontal),
+            lambda: self._tier_spacing(box, threshold, horizontal),
+            lambda: self._tier_grid(box, grid, horizontal),
+        )
+        for tier in tiers:
+            candidates = tier()
+            if candidates:
+                best = min(
+                    candidates, key=lambda c: (abs(c.delta), c.coord, c.delta)
+                )
+                return best.delta, best.guides
+        return 0.0, []
+
+    def _moving_edges(self, box, horizontal):
+        if horizontal:
+            return box.left(), box.right()
+        return box.top(), box.bottom()
+
+    def _moving_center(self, box, horizontal):
+        return box.center().x() if horizontal else box.center().y()
+
+    def _tier_char_edges(self, box, threshold, horizontal):
+        table = self._xs[0] if horizontal else self._ys[0]
+        return self._match_edges(self._moving_edges(box, horizontal), table,
+                                 threshold, GuideStyle.EDGE, horizontal)
+
+    def _tier_char_centers(self, box, threshold, horizontal):
+        table = self._xs[1] if horizontal else self._ys[1]
+        return self._match_edges((self._moving_center(box, horizontal),), table,
+                                 threshold, GuideStyle.CENTER, horizontal)
+
+    def _tier_canvas(self, box, threshold, horizontal):
+        size = self._canvas_w if horizontal else self._canvas_h
+        edge_targets = ((0.0, GuideStyle.EDGE), (size, GuideStyle.EDGE),
+                        (size / 2.0, GuideStyle.CENTER))
+        center_targets = ((size / 2.0, GuideStyle.CENTER),)
+        out = []
+        for edge in self._moving_edges(box, horizontal):
+            for coord, style in edge_targets:
+                delta = coord - edge
+                if abs(delta) <= threshold:
+                    out.append(_SnapCandidate(delta, coord,
+                                              [(horizontal, coord, style)]))
+        center = self._moving_center(box, horizontal)
+        for coord, style in center_targets:
+            delta = coord - center
+            if abs(delta) <= threshold:
+                out.append(_SnapCandidate(delta, coord,
+                                          [(horizontal, coord, style)]))
+        return out
+
+    def _match_edges(self, moving, table, threshold, style, horizontal):
+        out = []
+        for edge in moving:
+            for coord, key in table:
+                delta = coord - edge
+                if abs(delta) <= threshold:
+                    out.append(_SnapCandidate(delta, coord,
+                                              [(horizontal, coord, style)]))
+        return out
+
+    def _tier_spacing(self, box, threshold, horizontal):
+        if horizontal:
+            first, span = box.left(), box.width()
+            perp_lo, perp_hi = box.top(), box.bottom()
+            left_edge_of = lambda r: r.right()
+            right_edge_of = lambda r: r.left()
+            before, after = self._x_by_right, self._x_by_left
+        else:
+            first, span = box.top(), box.height()
+            perp_lo, perp_hi = box.left(), box.right()
+            left_edge_of = lambda r: r.bottom()
+            right_edge_of = lambda r: r.top()
+            before, after = self._y_by_bottom, self._y_by_top
+
+        near_left = self._nearest_before(before, left_edge_of,
+                                         first + threshold, perp_lo, perp_hi,
+                                         threshold, horizontal)
+        near_right = self._nearest_after(after, right_edge_of,
+                                         first + span - threshold,
+                                         perp_lo, perp_hi, threshold,
+                                         horizontal)
+        if near_left is None or near_right is None:
+            return []
+
+        bound_a = left_edge_of(near_left[1])
+        bound_b = right_edge_of(near_right[1])
+        gap = (bound_b - bound_a - span) / 2.0
+        if gap < 0:
+            return []
+        target = bound_a + gap
+        delta = target - first
+        if abs(delta) > threshold:
+            return []
+        return [
+            _SnapCandidate(
+                delta, target,
+                [(horizontal, bound_a, GuideStyle.SPACING),
+                 (horizontal, bound_b, GuideStyle.SPACING)],
+            )
+        ]
+
+    def _nearest_before(self, ordered, edge_of, limit, perp_lo, perp_hi,
+                        threshold, horizontal):
+        best = None
+        for key, rect in ordered:
+            value = edge_of(rect)
+            if value > limit:
+                break
+            if self._perpendicular_close(rect, perp_lo, perp_hi, threshold,
+                                         horizontal):
+                best = (key, rect)
+        return best
+
+    def _nearest_after(self, ordered, edge_of, limit, perp_lo, perp_hi,
+                       threshold, horizontal):
+        for key, rect in ordered:
+            if edge_of(rect) < limit:
+                continue
+            if self._perpendicular_close(rect, perp_lo, perp_hi, threshold,
+                                         horizontal):
+                return (key, rect)
+        return None
+
+    @staticmethod
+    def _perpendicular_close(rect, perp_lo, perp_hi, threshold, horizontal):
+        if horizontal:
+            rect_lo, rect_hi = rect.top(), rect.bottom()
+        else:
+            rect_lo, rect_hi = rect.left(), rect.right()
+        return rect_lo <= perp_hi + threshold and rect_hi >= perp_lo - threshold
+
+    def _tier_grid(self, box, grid, horizontal):
+        if grid <= 0:
+            return []
+        best = None
+        for edge in self._moving_edges(box, horizontal):
+            snapped = round(edge / grid) * grid
+            delta = snapped - edge
+            if delta == 0:
+                continue
+            if best is None or abs(delta) < abs(best.delta):
+                best = _SnapCandidate(delta, snapped, [])
+        return [best] if best is not None else []
 
 BASELINES = ["Bottom", "Center", "Top"]
 ALIGNMENTS = ["Left", "Center", "Right"]
@@ -164,6 +401,12 @@ class EditorScene(QGraphicsScene):
     snap_size = 0
     snapping_enabled = True
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._snap_engine = SnapEngine()
+        self._guide_pool = []
+        self._guide_pens = None
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.drag_started.emit()
@@ -179,34 +422,41 @@ class EditorScene(QGraphicsScene):
             self.drag_finished.emit()
 
     def begin_snap(self):
-        self._snap_targets = None
+        """Start a fresh detection pass; nothing survives from the last drag."""
+        self._snap_engine.reset()
         self._hide_guides()
 
     def end_snap(self):
-        self._snap_targets = None
+        self._snap_engine.reset()
         self._hide_guides()
-
-    def _guide_items(self):
-        if not hasattr(self, "_guide_v"):
-            pen = QPen(QColor(SNAP_GUIDE_COLOR))
-            pen.setCosmetic(True)
-            pen.setWidthF(1)
-            self._guide_v = QGraphicsLineItem()
-            self._guide_h = QGraphicsLineItem()
-            for item in (self._guide_v, self._guide_h):
-                item.setPen(pen)
-                item.setZValue(1000)
-                item.hide()
-                self.addItem(item)
-        return self._guide_v, self._guide_h
-
-    def _hide_guides(self):
-        if hasattr(self, "_guide_v"):
-            self._guide_v.hide()
-            self._guide_h.hide()
 
     def _item_scene_rect(self, item):
         return item.mapRectToScene(item.boundingRect())
+
+    def _gather_movers(self):
+        if not hasattr(self, "_snap_start"):
+            return []
+        # Dict order == scene item order (insertion order), so mover
+        # selection and the reference item are deterministic.
+        return [
+            (item, start)
+            for item, start in self._snap_start.items()
+            if item.pos() != start
+        ]
+
+    def _load_statics(self, movers):
+        moving = {id(item) for item, _start in movers}
+        statics = [
+            (id(item), self._item_scene_rect(item))
+            for item in self.parent_dialog.items
+            if item.isVisible() and id(item) not in moving
+        ]
+        self._snap_engine.set_statics(statics, *self.parent_dialog.canvas_size)
+
+    def _snap_threshold(self):
+        views = self.views()
+        zoom = abs(views[0].transform().m11()) if views else 1.0
+        return SNAP_THRESHOLD_PX / max(0.05, zoom)
 
     def _moving_rect(self, movers):
         rect = None
@@ -215,124 +465,77 @@ class EditorScene(QGraphicsScene):
             rect = r if rect is None else rect.united(r)
         return rect
 
-    def _snap_axis(self, edges, targets, box, axis):
-        if not hasattr(self, "_snap_threshold"):
-            return 0.0, None
-        candidates = []
-        for edge in edges:
-            for coord, item in targets:
-                delta = coord - edge
-                dist = abs(delta)
-                if dist > self._snap_threshold:
-                    continue
-                # Prefer placements that sit NEXT TO the other sprite
-                # rather than stacked on top of it (Figma-style ties).
-                overlap = False
-                if item is not None:
-                    probe = (
-                        box.translated(delta, 0)
-                        if axis == "x"
-                        else box.translated(0, delta)
-                    )
-                    # Shrink so edge-touching does not count as overlap.
-                    probe = probe.adjusted(0.01, 0.01, -0.01, -0.01)
-                    overlap = probe.intersects(self._snap_rects[id(item)])
-                candidates.append((dist, delta, coord, overlap))
-        if not candidates:
-            return 0.0, None
-        min_dist = min(c[0] for c in candidates)
-        tied = [c for c in candidates if c[0] <= min_dist + 0.75]
-        tied.sort(key=lambda c: (c[3], c[0]))
-        _dist, delta, coord, _overlap = tied[0]
-        return delta, coord
-
-    def _compute_snap_targets(self, movers):
-        moving = {id(item) for item, _start in movers}
-        xs = []
-        ys = []
-        rects = {}
-        canvas_w, canvas_h = self.parent_dialog.canvas_size
-        xs += [(0, None), (canvas_w / 2, None), (canvas_w, None)]
-        ys += [(0, None), (canvas_h / 2, None), (canvas_h, None)]
-        for item in self.parent_dialog.items:
-            if not item.isVisible() or id(item) in moving:
-                continue
-            r = self._item_scene_rect(item)
-            rects[id(item)] = r
-            xs += [(r.left(), item), (r.center().x(), item), (r.right(), item)]
-            ys += [(r.top(), item), (r.center().y(), item), (r.bottom(), item)]
-        self._snap_targets = (xs, ys)
-        self._snap_rects = rects
-
     def _apply_object_snap(self, modifiers=None):
         if (
             not self.snapping_enabled
-            or not hasattr(self, "_snap_start")
             or (modifiers is not None and modifiers & SNAP_DISABLED_MODIFIER)
         ):
             self._hide_guides()
             return
-        movers = [
-            (item, start)
-            for item, start in self._snap_start.items()
-            if item.pos() != start
-        ]
+        movers = self._gather_movers()
         if not movers:
             self._hide_guides()
             return
-        if self._snap_targets is None:
-            self._compute_snap_targets(movers)
+        if not self._snap_engine.is_ready():
+            self._load_statics(movers)
+
+        box = self._moving_rect(movers)
+        dx, dy, guides = self._snap_engine.find_snap(
+            box, self._snap_threshold(), self.snap_size
+        )
 
         first, first_start = movers[0]
         translation = first.pos() - first_start
-        box = self._moving_rect(movers)
+        for item, start in movers:
+            item.setPos(start + translation + QPointF(dx, dy))
+        self._render_guides(guides)
 
-        view = self.views()[0]
-        zoom = max(0.05, abs(view.transform().m11()))
-        self._snap_threshold = SNAP_THRESHOLD_PX / zoom
-
-        sx, guide_x = self._snap_axis(
-            (box.left(), box.center().x(), box.right()), self._snap_targets[0],
-            box, "x",
-        )
-        sy, guide_y = self._snap_axis(
-            (box.top(), box.center().y(), box.bottom()), self._snap_targets[1],
-            box, "y",
-        )
-
-        guide_x_target = guide_x if sx else None
-        guide_y_target = guide_y if sy else None
-
-        if not sx and not sy and self.snap_size > 0:
-            grid = self.snap_size
-            sx = round(box.left() / grid) * grid - box.left()
-            sy = round(box.top() / grid) * grid - box.top()
-
-        if not sx and not sy:
+    def _render_guides(self, guides):
+        if not guides:
             self._hide_guides()
             return
-
-        for item, start in movers:
-            item.setPos(start + translation + QPointF(sx, sy))
-
-        guide_v, guide_h = self._guide_items()
         scene_rect = self.sceneRect()
-        if guide_x_target is not None:
-            guide_v.setLine(
-                guide_x_target, scene_rect.top(),
-                guide_x_target, scene_rect.bottom(),
-            )
-            guide_v.show()
-        else:
-            guide_v.hide()
-        if guide_y_target is not None:
-            guide_h.setLine(
-                scene_rect.left(), guide_y_target,
-                scene_rect.right(), guide_y_target,
-            )
-            guide_h.show()
-        else:
-            guide_h.hide()
+        pool = self._guide_pool_items(len(guides))
+        for line_item, (horizontal, coord, style) in zip(pool, guides):
+            if horizontal:
+                line_item.setLine(
+                    coord, scene_rect.top(), coord, scene_rect.bottom()
+                )
+            else:
+                line_item.setLine(
+                    scene_rect.left(), coord, scene_rect.right(), coord
+                )
+            line_item.setPen(self._guide_pen(style))
+            line_item.show()
+
+    def _guide_pen(self, style):
+        if self._guide_pens is None:
+            edge = QPen(QColor(SNAP_GUIDE_COLOR))
+            center = QPen(QColor(SNAP_GUIDE_COLOR))
+            spacing = QPen(QColor(SNAP_SPACING_GUIDE_COLOR))
+            for pen in (edge, center, spacing):
+                pen.setCosmetic(True)
+                pen.setWidthF(1)
+            center.setDashPattern([4, 4])
+            self._guide_pens = {
+                GuideStyle.EDGE: edge,
+                GuideStyle.CENTER: center,
+                GuideStyle.SPACING: spacing,
+            }
+        return self._guide_pens[style]
+
+    def _guide_pool_items(self, count):
+        while len(self._guide_pool) < min(count, GUIDE_POOL_SIZE):
+            line_item = QGraphicsLineItem()
+            line_item.setZValue(1000)
+            line_item.hide()
+            self.addItem(line_item)
+            self._guide_pool.append(line_item)
+        return self._guide_pool[:count]
+
+    def _hide_guides(self):
+        for line_item in self._guide_pool:
+            line_item.hide()
 
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
@@ -717,15 +920,18 @@ class AdvancedEditorDialog(QDialog):
         self.scale_slider.setToolTip(
             "Size as a percentage of the original sprite. With several "
             "characters selected they scale together around the "
-            "selection, keeping their spacing."
+            "selection, keeping their spacing. Snaps to 100% or to "
+            "match another character's size while dragging."
         )
         self.scale_spin = QSpinBox()
         self.scale_spin.setRange(CHAR_SCALE_MIN, CHAR_SCALE_MAX)
         self.scale_spin.setValue(CHAR_SCALE_DEFAULT)
         self.scale_spin.setSuffix("%")
         self.scale_spin.setToolTip("Type an exact size percentage.")
-        self.scale_slider.valueChanged.connect(self.scale_spin.setValue)
-        self.scale_spin.valueChanged.connect(self._on_scale_changed)
+        self.scale_slider.valueChanged.connect(self._on_scale_slider_changed)
+        self.scale_spin.valueChanged.connect(self._on_scale_spin_changed)
+        self.scale_slider.sliderPressed.connect(self._begin_slider_undo)
+        self.scale_slider.sliderReleased.connect(self._end_slider_undo)
         scale_row = QHBoxLayout()
         scale_row.addWidget(self.scale_slider, 1)
         scale_row.addWidget(self.scale_spin)
@@ -737,14 +943,17 @@ class AdvancedEditorDialog(QDialog):
         self.rotation_slider.setTickPosition(QSlider.TicksBelow)
         self.rotation_slider.setTickInterval(45)
         self.rotation_slider.setToolTip(
-            "Clockwise rotation of the selected character(s)."
+            "Clockwise rotation of the selected character(s). Hold Shift "
+            "while dragging to snap to 45° increments."
         )
         self.rotation_spin = QSpinBox()
         self.rotation_spin.setRange(ROTATION_MIN, ROTATION_MAX)
         self.rotation_spin.setSuffix("°")
         self.rotation_spin.setToolTip("Type an exact rotation angle.")
-        self.rotation_slider.valueChanged.connect(self.rotation_spin.setValue)
-        self.rotation_spin.valueChanged.connect(self._on_rotation_changed)
+        self.rotation_slider.valueChanged.connect(self._on_rotation_slider_changed)
+        self.rotation_spin.valueChanged.connect(self._on_rotation_spin_changed)
+        self.rotation_slider.sliderPressed.connect(self._begin_slider_undo)
+        self.rotation_slider.sliderReleased.connect(self._end_slider_undo)
         rotation_row = QHBoxLayout()
         rotation_row.addWidget(self.rotation_slider, 1)
         rotation_row.addWidget(self.rotation_spin)
@@ -840,9 +1049,10 @@ class AdvancedEditorDialog(QDialog):
         self.snap_enable_cb = QCheckBox("Enabled")
         self.snap_enable_cb.setChecked(True)
         self.snap_enable_cb.setToolTip(
-            "Snap characters to other characters' edges, centres and "
-            "baselines, to the canvas edges and to the grid below. "
-            "Hold Alt while dragging to suspend snapping temporarily."
+            "Snap characters to other characters' edges and centres, to "
+            "even spacing between two characters, to the canvas edges "
+            "and centre, and to the grid below (lowest priority). Hold "
+            "Alt while dragging to suspend snapping temporarily."
         )
         self.snap_enable_cb.toggled.connect(self._on_snapping_toggled)
         form.addRow("Snapping:", self.snap_enable_cb)
@@ -1007,7 +1217,7 @@ class AdvancedEditorDialog(QDialog):
 
         self._update_status_counts()
 
-    def _apply_char_property(self, attr, value):
+    def _apply_char_property(self, attr, value, push=True):
         selected = [item for item in self._selected() if item.isVisible()]
         if not selected:
             return
@@ -1018,7 +1228,8 @@ class AdvancedEditorDialog(QDialog):
             for item in selected:
                 setattr(item, attr, value)
                 item.update_pixmap()
-        self._push(before)
+        if push:
+            self._push(before)
         self._sync_panel()
 
     def _rendered_size(self, item, scale_pct):
@@ -1051,17 +1262,77 @@ class AdvancedEditorDialog(QDialog):
             item.dy = new_cy - h / 2 - item.base_y
             item.update_pixmap()
 
-    def _on_scale_changed(self, value):
+    def _on_scale_slider_changed(self, value):
+        snapped = self._snap_scale_value(value)
+        for widget in (self.scale_slider, self.scale_spin):
+            widget.blockSignals(True)
+            widget.setValue(snapped)
+            widget.blockSignals(False)
+        self._apply_char_property(
+            "scale_pct", snapped, push=not self._in_slider_gesture()
+        )
+
+    def _on_scale_spin_changed(self, value):
         self.scale_slider.blockSignals(True)
         self.scale_slider.setValue(value)
         self.scale_slider.blockSignals(False)
         self._apply_char_property("scale_pct", value)
 
-    def _on_rotation_changed(self, value):
+    def _on_rotation_slider_changed(self, value):
+        snapped = self._snap_rotation_value(value)
+        for widget in (self.rotation_slider, self.rotation_spin):
+            widget.blockSignals(True)
+            widget.setValue(snapped)
+            widget.blockSignals(False)
+        self._apply_char_property(
+            "rotation", snapped, push=not self._in_slider_gesture()
+        )
+
+    def _on_rotation_spin_changed(self, value):
         self.rotation_slider.blockSignals(True)
         self.rotation_slider.setValue(value)
         self.rotation_slider.blockSignals(False)
         self._apply_char_property("rotation", value)
+
+    def _in_slider_gesture(self):
+        return getattr(self, "_slider_undo_before", None) is not None
+
+    def _begin_slider_undo(self):
+        # One undo entry per slider gesture, not one per tick.
+        snapshot = self._snapshot_selected()
+        self._slider_undo_before = snapshot or None
+
+    def _end_slider_undo(self):
+        before = getattr(self, "_slider_undo_before", None)
+        self._slider_undo_before = None
+        if before:
+            self._push(before)
+            self._update_status_counts()
+
+    def _snap_rotation_value(self, value, shift_held=None):
+        """Hard-snap to 45-degree increments while Shift is held."""
+        if shift_held is None:
+            shift_held = bool(
+                QApplication.queryKeyboardModifiers() & Qt.ShiftModifier
+            )
+        if not shift_held:
+            return value
+        snapped = round(value / ROTATE_SNAP_STEP) * ROTATE_SNAP_STEP
+        return max(ROTATION_MIN, min(ROTATION_MAX, snapped))
+
+    def _snap_scale_value(self, value):
+        """Snap the scale slider to match another character's size, or 100%."""
+        if not self.scene.snapping_enabled:
+            return value
+        candidates = {CHAR_SCALE_DEFAULT}
+        selected = {id(item) for item in self._selected()}
+        for item in self.items:
+            if item.isVisible() and id(item) not in selected:
+                candidates.add(item.scale_pct)
+        for candidate in sorted(candidates):
+            if abs(value - candidate) <= SCALE_SNAP_TOLERANCE_PCT:
+                return candidate
+        return value
 
     def _align_selection(self, mode):
         items = [item for item in self._selected() if item.isVisible()]
