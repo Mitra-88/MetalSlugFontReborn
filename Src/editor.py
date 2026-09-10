@@ -81,28 +81,11 @@ class _SnapCandidate:
 
 
 class SnapEngine:
-    """Document-space snapping math for the Advanced editor.
-
-    All inputs and outputs are in canvas (document) coordinates; the
-    caller converts a screen-pixel tolerance into document space using
-    the current view zoom, so snapping feels identical at every zoom
-    level. Detection is deterministic: candidates are resolved by the
-    total order (|delta|, coordinate, delta) and statics are kept in
-    sorted tables, never raw set/dict iteration order.
-
-    Priority tiers per axis (first tier with a candidate wins):
-      1. other characters' edges         (edge-to-edge only)
-      2. other characters' centers       (center-to-center only)
-      3. canvas/artboard edges + center
-      4. equal-gap spacing between two statics (Figma-style)
-      5. fixed grid fallback (no guides)
-    """
 
     def __init__(self):
         self.reset()
 
     def reset(self):
-        """Drop all per-drag state so every drag starts from a clean pass."""
         self._statics = []
         self._xs = None
         self._ys = None
@@ -113,11 +96,6 @@ class SnapEngine:
         return self._xs is not None
 
     def set_statics(self, statics, canvas_w, canvas_h):
-        """Load the immutable snap sources for one drag gesture.
-
-        statics: iterable of (key, QRectF) for every visible, non-moving
-        character; key only breaks ties, coordinates drive detection.
-        """
         self._statics = sorted(statics, key=lambda kv: kv[0])
         self._canvas_w = float(canvas_w)
         self._canvas_h = float(canvas_h)
@@ -135,11 +113,6 @@ class SnapEngine:
         self._y_by_bottom = sorted(self._statics, key=lambda kv: (kv[1].bottom(), kv[0]))
 
     def find_snap(self, box, threshold, grid):
-        """Return (dx, dy, guides) for the moving bounding box.
-
-        guides is a list of (axis, coord, GuideStyle) for the snaps that
-        are actually active this frame; empty when only the grid matched.
-        """
         dx, guides_x = self._snap_one_axis(box, threshold, grid, True)
         dy, guides_y = self._snap_one_axis(box, threshold, grid, False)
         return dx, dy, guides_x + guides_y
@@ -415,16 +388,8 @@ class EditorScene(QGraphicsScene):
     def mouseMoveEvent(self, event):
         super().mouseMoveEvent(event)
         if not (event.buttons() & Qt.LeftButton):
-            # Hover move (CharItem hover events enable viewport mouse
-            # tracking, so these arrive with no button pressed). Snapping
-            # must never run here, or placed characters get yanked to
-            # nearby targets every time the mouse moves over the canvas.
             self._hide_guides()
             return
-        # Absolute offset of the mouse from the grab point — the raw,
-        # unsnapped drag path. Snapping must be a pure function of
-        # this, never applied on top of its own previous corrections,
-        # or the item drifts off the cursor and keeps re-correcting.
         raw_translation = (
             event.scenePos() - event.buttonDownScenePos(Qt.LeftButton)
         )
@@ -436,7 +401,6 @@ class EditorScene(QGraphicsScene):
             self.drag_finished.emit()
 
     def begin_snap(self):
-        """Start a fresh detection pass; nothing survives from the last drag."""
         self._snap_engine.reset()
         self._hide_guides()
 
@@ -445,9 +409,6 @@ class EditorScene(QGraphicsScene):
         self._hide_guides()
 
     def _item_scene_rect(self, item):
-        # Visual bounds of the rendered sprite (integer edges on the pixel
-        # grid). QGraphicsPixmapItem.boundingRect() is expanded by 0.5px on
-        # every side, which would put all snap targets on half-pixels.
         pixmap = item.pixmap()
         return item.mapRectToScene(
             QRectF(0, 0, pixmap.width(), pixmap.height())
@@ -456,8 +417,6 @@ class EditorScene(QGraphicsScene):
     def _gather_movers(self):
         if not hasattr(self, "_snap_start"):
             return []
-        # Dict order == scene item order (insertion order), so mover
-        # selection and the reference item are deterministic.
         return [
             (item, start)
             for item, start in self._snap_start.items()
@@ -479,8 +438,6 @@ class EditorScene(QGraphicsScene):
         return SNAP_THRESHOLD_PX / max(0.05, zoom)
 
     def _raw_moving_rect(self, movers, translation):
-        """Union rect of the movers at start + raw translation (no snapping
-        applied), so detection is a pure function of the mouse path."""
         rect = None
         for item, start in movers:
             pixmap = item.pixmap()
@@ -492,8 +449,6 @@ class EditorScene(QGraphicsScene):
 
     def _apply_object_snap(self, modifiers=None, raw_translation=None):
         if raw_translation is None:
-            # No active drag (hover move or programmatic call): snapping
-            # must never touch already-placed characters.
             self._hide_guides()
             return
         if (
@@ -1274,9 +1229,6 @@ class AdvancedEditorDialog(QDialog):
         return w, h
 
     def _scale_selection(self, items, value):
-        # Scale every character around the centre of the whole selection
-        # so grouped characters keep their relative spacing instead of
-        # piling up on each other.
         rects = {item: self.scene._item_scene_rect(item) for item in items}
         union = rects[items[0]]
         for rect in rects.values():
@@ -1330,7 +1282,6 @@ class AdvancedEditorDialog(QDialog):
         return getattr(self, "_slider_undo_before", None) is not None
 
     def _begin_slider_undo(self):
-        # One undo entry per slider gesture, not one per tick.
         snapshot = self._snapshot_selected()
         self._slider_undo_before = snapshot or None
 
@@ -1342,7 +1293,6 @@ class AdvancedEditorDialog(QDialog):
             self._update_status_counts()
 
     def _snap_rotation_value(self, value, shift_held=None):
-        """Hard-snap to 45-degree increments while Shift is held."""
         if shift_held is None:
             shift_held = bool(
                 QApplication.queryKeyboardModifiers() & Qt.ShiftModifier
@@ -1353,7 +1303,6 @@ class AdvancedEditorDialog(QDialog):
         return max(ROTATION_MIN, min(ROTATION_MAX, snapped))
 
     def _snap_scale_value(self, value):
-        """Snap the scale slider to match another character's size, or 100%."""
         if not self.scene.snapping_enabled:
             return value
         candidates = {CHAR_SCALE_DEFAULT}
@@ -1387,7 +1336,7 @@ class AdvancedEditorDialog(QDialog):
                 ddx, ddy = 0, union.top() - rect.top()
             elif mode == "bottom":
                 ddx, ddy = 0, union.bottom() - rect.bottom()
-            else:  # middle
+            else:
                 ddx, ddy = 0, union.center().y() - rect.center().y()
             if ddx or ddy:
                 item.dx += ddx

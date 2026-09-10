@@ -179,8 +179,6 @@ class PreviewScrollArea(QScrollArea):
         return self._zoom
 
     def update_alignment(self):
-        # Centered content overlaps the scrollbars once they appear, so
-        # only center the image while it fits inside the viewport.
         widget = self.widget()
         if widget is None:
             return
