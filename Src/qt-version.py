@@ -6,16 +6,17 @@ from string import ascii_letters, ascii_uppercase, digits
 from time import time
 
 from PIL import Image as PILImage
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import (QEasingCurve, QObject, QPropertyAnimation, Qt,
+                            QThread, QTimer, QUrl, Signal, Slot)
 from PySide6.QtGui import (QColor, QDesktopServices, QFont, QGradient, QIcon,
                            QLinearGradient, QPainter, QPaintEvent, QPen,
                            QPixmap, QSyntaxHighlighter, QTextCharFormat)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QFileDialog, QFrame,
-                               QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-                               QMainWindow, QMessageBox, QPlainTextEdit,
-                               QPushButton, QScrollArea, QSlider, QStyle,
-                               QVBoxLayout, QWidget)
+                               QGridLayout, QGraphicsOpacityEffect, QGroupBox,
+                               QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+                               QPlainTextEdit, QPushButton, QScrollArea,
+                               QSlider, QStyle, QVBoxLayout, QWidget)
 
 from editor import AdvancedEditorDialog
 from image_generation import generate_filename, generate_image, get_font_paths
@@ -28,7 +29,7 @@ PREVIEW_COMPRESS_LEVEL = 0
 DISABLE_COMPRESSION = 0
 
 WINDOW_MIN_WIDTH = 700
-WINDOW_MIN_HEIGHT = 680
+WINDOW_MIN_HEIGHT = 640
 INITIAL_PROMPT_DELAY = 100
 
 MAIN_LAYOUT_SPACING = 18
@@ -40,6 +41,8 @@ GENERATE_BUTTON_MIN_HEIGHT = 42
 PREVIEW_MIN_HEIGHT = 140
 PREVIEW_TIMER_INTERVAL = 150
 PREVIEW_MAX_DIMENSION = 32768
+PREVIEW_DIM_OPACITY = 0.55
+PREVIEW_PULSE_MSEC = 160
 
 CHAR_COUNT_TIMER_INTERVAL = 150
 
@@ -47,6 +50,13 @@ COMPRESS_SLIDER_MIN = 0
 COMPRESS_SLIDER_MAX = 9
 COMPRESS_SLIDER_TICK_INTERVAL = 1
 COMPRESS_LEVEL_LABEL_WIDTH = 20
+COMPRESS_HINTS = (
+    (0, "fastest save, largest file"),
+    (2, "fast save, larger file"),
+    (6, "balanced (recommended)"),
+    (8, "slow save, smaller file"),
+    (9, "smallest file, slowest save"),
+)
 
 TOOLTIP_DURATION = 5000
 
@@ -58,6 +68,7 @@ WARNING_LABEL_HEIGHT = 28
 ZOOM_MIN = 10
 ZOOM_MAX = 100
 ZOOM_DEFAULT = 100
+ZOOM_SLIDER_WIDTH = 120
 
 THREAD_WAIT_TIMEOUT_MS = 3000
 
@@ -344,6 +355,38 @@ class MainWindow(QMainWindow):
             MAIN_LAYOUT_MARGIN,
         )
 
+        self._build_text_section(main_layout)
+        self._build_preview_section(main_layout)
+        self._build_output_section(main_layout)
+        self._build_save_row(main_layout)
+        self._build_action_row(main_layout)
+
+        self.update_colors()
+        self.toggle_compression_options(True)
+
+        self.text_input.textChanged.connect(self.schedule_preview_update)
+        self.text_input.textChanged.connect(self.update_generate_button_state)
+        self.font_select.currentIndexChanged.connect(self.schedule_preview_update)
+        self.font_select.currentIndexChanged.connect(self._on_font_changed)
+        self.color_select.currentTextChanged.connect(self.schedule_preview_update)
+        self.schedule_preview_update()
+
+        for first, second in (
+            (self.text_input, self.font_select),
+            (self.font_select, self.color_select),
+            (self.color_select, self.supported_btn),
+            (self.supported_btn, self.scale_select),
+            (self.scale_select, self.compress_option),
+            (self.compress_option, self.compress_level_slider),
+            (self.compress_level_slider, self.browse_btn),
+            (self.browse_btn, self.generate_btn),
+            (self.generate_btn, self.advanced_btn),
+        ):
+            self.setTabOrder(first, second)
+
+        self.create_menubar()
+
+    def _build_text_section(self, main_layout):
         text_group = QGroupBox("Text")
         text_layout = QVBoxLayout(text_group)
 
@@ -360,9 +403,18 @@ class MainWindow(QMainWindow):
             self.text_input.document(), font_id=1
         )
 
+        self.unsupported_hint = QLabel()
+        self.unsupported_hint.setWordWrap(True)
+        self.unsupported_hint.setStyleSheet(
+            "color: palette(bright-text); font-style: italic;"
+        )
+        self.unsupported_hint.setVisible(False)
+
         self.text_info_layout = QHBoxLayout()
         self.char_count_label = QLabel("Characters: 0")
         self.text_info_layout.addWidget(self.char_count_label)
+        self.text_info_layout.addStretch()
+        self.text_info_layout.addWidget(self.unsupported_hint)
         self.text_info_layout.addStretch()
 
         self.dimensions_label = QLabel("Resolution: -")
@@ -371,6 +423,7 @@ class MainWindow(QMainWindow):
         text_layout.addLayout(self.text_info_layout)
         main_layout.addWidget(text_group)
 
+    def _build_preview_section(self, main_layout):
         preview_group = QGroupBox("Font & Preview")
         preview_layout = QVBoxLayout(preview_group)
         preview_layout.setSpacing(12)
@@ -380,7 +433,7 @@ class MainWindow(QMainWindow):
         self.font_select = QComboBox()
         self.font_select.addItems(map(str, sorted(FONT_COLORS)))
         self.font_select.setToolTip(
-            "Metal Slug font style. Font 5 supports uppercase only."
+            "Metal Slug font style. Font 5 supports uppercase letters only."
         )
         self.font_select.currentIndexChanged.connect(self.update_colors)
         self._populate_font_preview_icons()
@@ -400,28 +453,6 @@ class MainWindow(QMainWindow):
         self.font5_warning.setVisible(False)
         preview_layout.addWidget(self.font5_warning)
 
-        zoom_layout = QHBoxLayout()
-        zoom_layout.addWidget(QLabel("Zoom:"))
-        self.zoom_slider = QSlider(Qt.Horizontal)
-        self.zoom_slider.setRange(ZOOM_MIN, ZOOM_MAX)
-        self.zoom_slider.setValue(ZOOM_DEFAULT)
-        self.zoom_slider.setTickPosition(QSlider.TicksBelow)
-        self.zoom_slider.setTickInterval(10)
-        self.zoom_slider.setToolTip("Preview zoom (Ctrl + mouse wheel works too).")
-        self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
-        zoom_layout.addWidget(self.zoom_slider)
-        self.zoom_label = QLabel(f"{ZOOM_DEFAULT}%")
-        self.zoom_label.setFixedWidth(40)
-        zoom_layout.addWidget(self.zoom_label)
-        zoom_layout.addStretch()
-        self.zoom_fit_btn = QPushButton("Fit")
-        self.zoom_fit_btn.setToolTip(
-            "Scale the preview so the whole image fits the available space."
-        )
-        self.zoom_fit_btn.clicked.connect(self.fit_preview)
-        zoom_layout.addWidget(self.zoom_fit_btn)
-        preview_layout.addLayout(zoom_layout)
-
         self.preview_scroll = PreviewScrollArea()
         self.preview_scroll.setMinimumHeight(PREVIEW_MIN_HEIGHT)
         self.preview_scroll.setToolTip(
@@ -434,13 +465,49 @@ class MainWindow(QMainWindow):
         self.preview_label.setText("Loading preview...")
         self.preview_scroll.setWidget(self.preview_label)
 
+        self.preview_effect = QGraphicsOpacityEffect(self.preview_label)
+        self.preview_effect.setOpacity(1.0)
+        self.preview_label.setGraphicsEffect(self.preview_effect)
+
+        self.preview_pulse = QPropertyAnimation(self.preview_effect, b"opacity", self)
+        self.preview_pulse.setDuration(PREVIEW_PULSE_MSEC)
+        self.preview_pulse.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.preview_pulse.setStartValue(PREVIEW_DIM_OPACITY)
+        self.preview_pulse.setEndValue(1.0)
+
         preview_layout.addWidget(self.preview_scroll)
 
+        status_row = QHBoxLayout()
         self.supported_btn = ViewSupportedButton(self)
         self.supported_btn.setToolTip(
             "Shows exactly which characters and symbols the selected font supports."
         )
-        preview_layout.addWidget(self.supported_btn)
+        status_row.addWidget(self.supported_btn)
+        status_row.addStretch()
+
+        status_row.addWidget(QLabel("Zoom:"))
+        self.zoom_slider = QSlider(Qt.Horizontal)
+        self.zoom_slider.setRange(ZOOM_MIN, ZOOM_MAX)
+        self.zoom_slider.setValue(ZOOM_DEFAULT)
+        self.zoom_slider.setFixedWidth(ZOOM_SLIDER_WIDTH)
+        self.zoom_slider.setToolTip(
+            "Preview zoom. Ctrl + mouse wheel over the preview works too."
+        )
+        self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
+        status_row.addWidget(self.zoom_slider)
+
+        self.zoom_label = QLabel(f"{ZOOM_DEFAULT}%")
+        self.zoom_label.setFixedWidth(40)
+        status_row.addWidget(self.zoom_label)
+
+        self.zoom_fit_btn = QPushButton("Fit")
+        self.zoom_fit_btn.setToolTip(
+            "Scale the preview so the whole image fits the available space."
+        )
+        self.zoom_fit_btn.clicked.connect(self.fit_preview)
+        status_row.addWidget(self.zoom_fit_btn)
+
+        preview_layout.addLayout(status_row)
 
         self.preview_timer = QTimer(self)
         self.preview_timer.setSingleShot(True)
@@ -454,43 +521,53 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(preview_group, 1)
 
-        options_group = QGroupBox("Output")
-        options_grid = QGridLayout(options_group)
-        options_grid.setHorizontalSpacing(FORM_LAYOUT_H_SPACING)
+    def _build_output_section(self, main_layout):
+        self.output_group = QGroupBox("Output settings")
+        self.output_group.setCheckable(True)
+        self.output_group.setChecked(False)
+        self.output_group.setToolTip(
+            "Image size and PNG compression. The defaults are recommended "
+            "for most users."
+        )
+        self.output_group.toggled.connect(self._on_output_group_toggled)
 
-        options_grid.addWidget(QLabel("Scale:"), 0, 0)
+        group_layout = QVBoxLayout(self.output_group)
+        self.output_content = QWidget()
+        group_layout.addWidget(self.output_content)
+
+        grid = QGridLayout(self.output_content)
+        grid.setHorizontalSpacing(FORM_LAYOUT_H_SPACING)
+
+        grid.addWidget(QLabel("Image size:"), 0, 0)
         self.scale_select = QComboBox()
         self.scale_select.addItems(["1x (Native)", "2x", "3x", "4x"])
-        self.scale_select.setToolTip("Multiply the output image size.")
-        self.scale_select.currentIndexChanged.connect(self.schedule_preview_update)
-        options_grid.addWidget(self.scale_select, 0, 1)
-
-        self.advanced_mode_cb = QCheckBox("Advanced Mode (Beta)")
-        self.advanced_mode_cb.setToolTip(
-            "BETA: generate into a per-character editor where you can "
-            "drag, scale, rotate, and replace each character "
-            "before exporting. Still experimental"
+        self.scale_select.setToolTip(
+            "Make the exported image larger. 1x matches the game's native "
+            "resolution."
         )
-        self.advanced_mode_cb.toggled.connect(self.toggle_advanced_mode)
-        options_grid.addWidget(self.advanced_mode_cb, 0, 2, 1, 2)
+        self.scale_select.currentIndexChanged.connect(self.schedule_preview_update)
+        grid.addWidget(self.scale_select, 0, 1)
 
-        self.compress_option = QCheckBox("Compression")
+        self.compress_option = QCheckBox("Compress PNG")
         self.compress_option.setChecked(True)
         self.compress_option.setToolTip(
-            "Make PNG files smaller. Turn off to save images faster."
+            "Recommended. Shrinks the PNG file size with no visible quality "
+            "loss. Turn off to save images faster."
         )
         self.compress_option.toggled.connect(self.toggle_compression_options)
+        grid.addWidget(self.compress_option, 1, 0)
 
         self.level_layout = QHBoxLayout()
         self.level_layout.setSpacing(8)
-        self.level_layout.addWidget(QLabel("Level:"))
+        self.level_layout.addWidget(QLabel("Amount:"))
         self.compress_level_slider = QSlider(Qt.Horizontal)
         self.compress_level_slider.setRange(COMPRESS_SLIDER_MIN, COMPRESS_SLIDER_MAX)
         self.compress_level_slider.setValue(DEFAULT_COMPRESS_LEVEL)
         self.compress_level_slider.setTickPosition(QSlider.TicksBelow)
         self.compress_level_slider.setTickInterval(COMPRESS_SLIDER_TICK_INTERVAL)
         self.compress_level_slider.setToolTip(
-            "0 = fastest, larger file; 9 = smallest file."
+            "Slide left for faster saving and a larger file, right for a "
+            "smaller file and slower saving. 6 (balanced) is recommended."
         )
         self.compress_level_slider.valueChanged.connect(
             self.update_compress_level_label
@@ -499,18 +576,20 @@ class MainWindow(QMainWindow):
         self.compress_level_label = QLabel(str(DEFAULT_COMPRESS_LEVEL))
         self.compress_level_label.setFixedWidth(COMPRESS_LEVEL_LABEL_WIDTH)
 
+        self.compress_hint_label = QLabel()
+        self.compress_hint_label.setStyleSheet("font-style: italic;")
+
         self.level_layout.addWidget(self.compress_level_slider)
         self.level_layout.addWidget(self.compress_level_label)
+        self.level_layout.addWidget(self.compress_hint_label)
         self.level_layout.addStretch()
 
-        compress_row = QHBoxLayout()
-        compress_row.addWidget(self.compress_option)
-        compress_row.addSpacing(12)
-        compress_row.addLayout(self.level_layout, 1)
-        options_grid.addLayout(compress_row, 1, 0, 1, 4)
+        grid.addLayout(self.level_layout, 1, 1)
 
-        main_layout.addWidget(options_group)
+        self.output_content.setVisible(False)
+        main_layout.addWidget(self.output_group)
 
+    def _build_save_row(self, main_layout):
         save_row = QHBoxLayout()
         self.save_location_label = QLabel("Save location: Desktop (default)")
         self.update_save_location_display()
@@ -522,6 +601,7 @@ class MainWindow(QMainWindow):
         save_row.addWidget(self.browse_btn)
         main_layout.addLayout(save_row)
 
+    def _build_action_row(self, main_layout):
         self.generate_btn = QPushButton("Generate Image")
         self.generate_btn.setToolTip(
             "Render the text and save it as a PNG to the save location."
@@ -529,33 +609,24 @@ class MainWindow(QMainWindow):
         self.generate_btn.setMinimumHeight(GENERATE_BUTTON_MIN_HEIGHT)
         self.generate_btn.clicked.connect(self.generate_image)
         self.generate_btn.setEnabled(False)
-        main_layout.addWidget(self.generate_btn)
+        self.generate_btn.setDefault(True)
 
-        self.update_colors()
-        self.toggle_compression_options(True)
+        self.advanced_btn = QPushButton("Advanced Editor…")
+        self.advanced_btn.setToolTip(
+            "Fine-tune the image before saving: drag, scale, rotate and "
+            "replace individual characters."
+        )
+        self.advanced_btn.setMinimumHeight(GENERATE_BUTTON_MIN_HEIGHT)
+        self.advanced_btn.clicked.connect(self.open_advanced_editor)
+        self.advanced_btn.setEnabled(False)
 
-        self.text_input.textChanged.connect(self.schedule_preview_update)
-        self.text_input.textChanged.connect(self.update_generate_button_state)
-        self.font_select.currentIndexChanged.connect(self.schedule_preview_update)
-        self.font_select.currentIndexChanged.connect(self._on_font_changed)
-        self.color_select.currentTextChanged.connect(self.schedule_preview_update)
-        self.schedule_preview_update()
+        action_row = QHBoxLayout()
+        action_row.addWidget(self.generate_btn, 1)
+        action_row.addWidget(self.advanced_btn)
+        main_layout.addLayout(action_row)
 
-        for first, second in (
-            (self.text_input, self.font_select),
-            (self.font_select, self.color_select),
-            (self.color_select, self.zoom_slider),
-            (self.zoom_slider, self.supported_btn),
-            (self.supported_btn, self.scale_select),
-            (self.scale_select, self.advanced_mode_cb),
-            (self.advanced_mode_cb, self.compress_option),
-            (self.compress_option, self.compress_level_slider),
-            (self.compress_level_slider, self.browse_btn),
-            (self.browse_btn, self.generate_btn),
-        ):
-            self.setTabOrder(first, second)
-
-        self.create_menubar()
+    def _on_output_group_toggled(self, checked):
+        self.output_content.setVisible(checked)
 
     def _populate_font_preview_icons(self):
         for font_id in sorted(FONT_COLORS):
@@ -582,6 +653,7 @@ class MainWindow(QMainWindow):
     def _on_font_changed(self, _):
         font_id = int(self.font_select.currentText())
         self.highlighter.set_font_id(font_id)
+        self._update_unsupported_hint(self.text_input.toPlainText())
 
     def _on_zoom_changed(self, value):
         self._preview_user_zoomed = True
@@ -626,6 +698,7 @@ class MainWindow(QMainWindow):
     def update_generate_button_state(self):
         has_text = bool(self.text_input.toPlainText().strip())
         self.generate_btn.setEnabled(has_text)
+        self.advanced_btn.setEnabled(has_text)
         self._update_window_title()
 
     def _update_window_title(self):
@@ -634,16 +707,24 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"MetalSlugFontReborn - {char_count} characters")
 
     def schedule_preview_update(self):
+        self.preview_pulse.stop()
+        self.preview_effect.setOpacity(PREVIEW_DIM_OPACITY)
         self.preview_timer.start()
         self.supported_btn.reset_to_normal()
 
     def schedule_char_count_update(self):
         self.char_count_timer.start()
 
+    def _settle_preview_pulse(self):
+        if self.preview_effect.opacity() < 1.0:
+            self.preview_pulse.setStartValue(self.preview_effect.opacity())
+            self.preview_pulse.start()
+
     def _set_preview_error(self, message):
         self.preview_label.setPixmap(QPixmap())
         self.preview_label.setText(message)
         self.dimensions_label.setText("Resolution: -")
+        self._settle_preview_pulse()
 
     def _display_preview_image(self, pil_image, scale):
         self._last_preview = (pil_image, scale)
@@ -686,6 +767,7 @@ class MainWindow(QMainWindow):
         self.preview_label.setPixmap(pixmap)
         self.preview_label.adjustSize()
         self.preview_scroll.update_alignment()
+        self._settle_preview_pulse()
 
         if pixmap.isNull():
             self._set_preview_error("Preview unavailable")
@@ -727,9 +809,20 @@ class MainWindow(QMainWindow):
 
     def update_character_count(self):
         text = self.text_input.toPlainText()
-        char_count = len(text)
-        self.char_count_label.setText(f"Characters: {char_count}")
+        self.char_count_label.setText(f"Characters: {len(text)}")
+        self._update_unsupported_hint(text)
         self._update_window_title()
+
+    def _update_unsupported_hint(self, text):
+        valid = FONT_VALID_CHARS[int(self.font_select.currentText())]
+        bad = sum(1 for ch in text if ch not in valid)
+        if bad:
+            self.unsupported_hint.setText(
+                f"{bad} unsupported character(s) — highlighted red, skipped in the output"
+            )
+            self.unsupported_hint.setVisible(True)
+        else:
+            self.unsupported_hint.setVisible(False)
 
     def update_save_location_display(self):
         folder_name = self.save_path.name
@@ -869,11 +962,12 @@ class MainWindow(QMainWindow):
             if widget:
                 widget.setVisible(checked)
 
-    def toggle_advanced_mode(self, checked):
-        self.generate_btn.setText("Generate & Edit" if checked else "Generate Image")
-
     def update_compress_level_label(self, value):
         self.compress_level_label.setText(str(value))
+        for top, hint in COMPRESS_HINTS:
+            if value <= top:
+                self.compress_hint_label.setText(hint)
+                break
 
     def select_save_path(self):
         if path := QFileDialog.getExistingDirectory(
@@ -885,34 +979,30 @@ class MainWindow(QMainWindow):
                 self, "Save Location Updated", f"Images will now be saved to:\n{path}"
             )
 
-    def generate_image(self):
+    def _collect_params(self):
         text = self.text_input.toPlainText().strip()
-        if not text:
-            return
-
         font = int(self.font_select.currentText())
         if font == 5:
             text = text.upper()
 
         compress_enabled = self.compress_option.isChecked()
-        compress_level = (
-            self.compress_level_slider.value()
-            if compress_enabled
-            else DISABLE_COMPRESSION
-        )
-
-        params = {
+        return {
             "text": text,
             "font": font,
             "color": self.color_select.currentText(),
             "save_path": str(self.save_path),
             "compress": compress_enabled,
-            "compress_level": compress_level,
+            "compress_level": (
+                self.compress_level_slider.value()
+                if compress_enabled
+                else DISABLE_COMPRESSION
+            ),
             "scale": self.scale_select.currentIndex() + 1,
         }
 
-        if self.advanced_mode_cb.isChecked():
-            self.open_advanced_editor(params)
+    def generate_image(self):
+        params = self._collect_params()
+        if not params["text"]:
             return
 
         self.generate_btn.setEnabled(False)
@@ -921,7 +1011,11 @@ class MainWindow(QMainWindow):
 
         self.trigger_generation.emit(params)
 
-    def open_advanced_editor(self, params):
+    def open_advanced_editor(self):
+        params = self._collect_params()
+        if not params["text"]:
+            return
+
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             dialog = AdvancedEditorDialog(
