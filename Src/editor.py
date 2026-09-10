@@ -1628,12 +1628,12 @@ class AdvancedEditorDialog(QDialog):
             if bbox:
                 canvas = canvas.crop(bbox)
 
-        scale = self.params.get("scale", 100)
-        if scale and scale != 100:
+        scale = self.params.get("scale", 1)
+        if scale and scale != 1:
             canvas = canvas.resize(
                 (
-                    max(1, int(canvas.width * scale / 100)),
-                    max(1, int(canvas.height * scale / 100)),
+                    max(1, canvas.width * scale),
+                    max(1, canvas.height * scale),
                 ),
                 Image.Resampling.NEAREST,
             )
