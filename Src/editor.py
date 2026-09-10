@@ -414,7 +414,16 @@ class EditorScene(QGraphicsScene):
 
     def mouseMoveEvent(self, event):
         super().mouseMoveEvent(event)
-        self._apply_object_snap(event.modifiers())
+        raw_translation = None
+        if event.buttons() & Qt.LeftButton:
+            # Absolute offset of the mouse from the grab point — the raw,
+            # unsnapped drag path. Snapping must be a pure function of
+            # this, never applied on top of its own previous corrections,
+            # or the item drifts off the cursor and keeps re-correcting.
+            raw_translation = (
+                event.scenePos() - event.buttonDownScenePos(Qt.LeftButton)
+            )
+        self._apply_object_snap(event.modifiers(), raw_translation)
 
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
@@ -431,7 +440,13 @@ class EditorScene(QGraphicsScene):
         self._hide_guides()
 
     def _item_scene_rect(self, item):
-        return item.mapRectToScene(item.boundingRect())
+        # Visual bounds of the rendered sprite (integer edges on the pixel
+        # grid). QGraphicsPixmapItem.boundingRect() is expanded by 0.5px on
+        # every side, which would put all snap targets on half-pixels.
+        pixmap = item.pixmap()
+        return item.mapRectToScene(
+            QRectF(0, 0, pixmap.width(), pixmap.height())
+        )
 
     def _gather_movers(self):
         if not hasattr(self, "_snap_start"):
@@ -458,14 +473,19 @@ class EditorScene(QGraphicsScene):
         zoom = abs(views[0].transform().m11()) if views else 1.0
         return SNAP_THRESHOLD_PX / max(0.05, zoom)
 
-    def _moving_rect(self, movers):
+    def _raw_moving_rect(self, movers, translation):
+        """Union rect of the movers at start + raw translation (no snapping
+        applied), so detection is a pure function of the mouse path."""
         rect = None
-        for item, _start in movers:
-            r = self._item_scene_rect(item)
+        for item, start in movers:
+            pixmap = item.pixmap()
+            r = QRectF(0, 0, pixmap.width(), pixmap.height()).translated(
+                start.x() + translation.x(), start.y() + translation.y()
+            )
             rect = r if rect is None else rect.united(r)
         return rect
 
-    def _apply_object_snap(self, modifiers=None):
+    def _apply_object_snap(self, modifiers=None, raw_translation=None):
         if (
             not self.snapping_enabled
             or (modifiers is not None and modifiers & SNAP_DISABLED_MODIFIER)
@@ -479,13 +499,20 @@ class EditorScene(QGraphicsScene):
         if not self._snap_engine.is_ready():
             self._load_statics(movers)
 
-        box = self._moving_rect(movers)
+        if raw_translation is None:
+            # Fallback for programmatic use: derive the offset from the
+            # first mover's current displacement.
+            first, first_start = movers[0]
+            raw_translation = first.pos() - first_start
+        translation = QPointF(
+            round(raw_translation.x()), round(raw_translation.y())
+        )
+
+        box = self._raw_moving_rect(movers, translation)
         dx, dy, guides = self._snap_engine.find_snap(
             box, self._snap_threshold(), self.snap_size
         )
 
-        first, first_start = movers[0]
-        translation = first.pos() - first_start
         for item, start in movers:
             item.setPos(start + translation + QPointF(dx, dy))
         self._render_guides(guides)
