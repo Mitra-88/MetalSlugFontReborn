@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QFileDialog, QFrame,
                                QGridLayout, QGroupBox, QHBoxLayout, QLabel,
                                QMainWindow, QMessageBox, QPlainTextEdit,
-                               QPushButton, QScrollArea, QSlider, QVBoxLayout,
-                               QWidget)
+                               QPushButton, QScrollArea, QSlider, QStyle,
+                               QVBoxLayout, QWidget)
 
 from editor import AdvancedEditorDialog
 from image_generation import generate_filename, generate_image, get_font_paths
@@ -27,17 +27,17 @@ DEFAULT_COMPRESS_LEVEL = 6
 PREVIEW_COMPRESS_LEVEL = 0
 DISABLE_COMPRESSION = 0
 
-WINDOW_MIN_WIDTH = 680
-WINDOW_MIN_HEIGHT = 640
+WINDOW_MIN_WIDTH = 700
+WINDOW_MIN_HEIGHT = 680
 INITIAL_PROMPT_DELAY = 100
 
-MAIN_LAYOUT_SPACING = 15
-MAIN_LAYOUT_MARGIN = 20
+MAIN_LAYOUT_SPACING = 18
+MAIN_LAYOUT_MARGIN = 22
 TEXT_INPUT_MAX_HEIGHT = 55
 FORM_LAYOUT_H_SPACING = 20
 GENERATE_BUTTON_MIN_HEIGHT = 42
 
-PREVIEW_MIN_HEIGHT = 100
+PREVIEW_MIN_HEIGHT = 140
 PREVIEW_TIMER_INTERVAL = 150
 PREVIEW_MAX_DIMENSION = 32768
 
@@ -178,6 +178,24 @@ class PreviewScrollArea(QScrollArea):
     def get_zoom(self):
         return self._zoom
 
+    def update_alignment(self):
+        # Centered content overlaps the scrollbars once they appear, so
+        # only center the image while it fits inside the viewport.
+        widget = self.widget()
+        if widget is None:
+            return
+        vp = self.viewport().size()
+        if (
+            widget.width() > vp.width() or widget.height() > vp.height()
+        ):
+            self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        else:
+            self.setAlignment(Qt.AlignCenter)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_alignment()
+
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
             delta = event.angleDelta().y()
@@ -313,6 +331,9 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def setup_ui(self):
+        self._preview_user_zoomed = False
+        self._last_preview = None
+
         central = QWidget()
         self.setCentralWidget(central)
 
@@ -354,6 +375,7 @@ class MainWindow(QMainWindow):
 
         preview_group = QGroupBox("Font & Preview")
         preview_layout = QVBoxLayout(preview_group)
+        preview_layout.setSpacing(12)
 
         picker_row = QHBoxLayout()
         picker_row.addWidget(QLabel("Font:"))
@@ -394,6 +416,12 @@ class MainWindow(QMainWindow):
         self.zoom_label.setFixedWidth(40)
         zoom_layout.addWidget(self.zoom_label)
         zoom_layout.addStretch()
+        self.zoom_fit_btn = QPushButton("Fit")
+        self.zoom_fit_btn.setToolTip(
+            "Scale the preview so the whole image fits the available space."
+        )
+        self.zoom_fit_btn.clicked.connect(self.fit_preview)
+        zoom_layout.addWidget(self.zoom_fit_btn)
         preview_layout.addLayout(zoom_layout)
 
         self.preview_scroll = PreviewScrollArea()
@@ -426,7 +454,7 @@ class MainWindow(QMainWindow):
         self.char_count_timer.setInterval(CHAR_COUNT_TIMER_INTERVAL)
         self.char_count_timer.timeout.connect(self.update_character_count)
 
-        main_layout.addWidget(preview_group)
+        main_layout.addWidget(preview_group, 1)
 
         options_group = QGroupBox("Output")
         options_grid = QGridLayout(options_group)
@@ -454,9 +482,9 @@ class MainWindow(QMainWindow):
             "Make PNG files smaller. Turn off to save images faster."
         )
         self.compress_option.toggled.connect(self.toggle_compression_options)
-        options_grid.addWidget(self.compress_option, 1, 0, 1, 2)
 
         self.level_layout = QHBoxLayout()
+        self.level_layout.setSpacing(8)
         self.level_layout.addWidget(QLabel("Level:"))
         self.compress_level_slider = QSlider(Qt.Horizontal)
         self.compress_level_slider.setRange(COMPRESS_SLIDER_MIN, COMPRESS_SLIDER_MAX)
@@ -476,7 +504,12 @@ class MainWindow(QMainWindow):
         self.level_layout.addWidget(self.compress_level_slider)
         self.level_layout.addWidget(self.compress_level_label)
         self.level_layout.addStretch()
-        options_grid.addLayout(self.level_layout, 1, 2, 1, 2)
+
+        compress_row = QHBoxLayout()
+        compress_row.addWidget(self.compress_option)
+        compress_row.addSpacing(12)
+        compress_row.addLayout(self.level_layout, 1)
+        options_grid.addLayout(compress_row, 1, 0, 1, 4)
 
         main_layout.addWidget(options_group)
 
@@ -553,10 +586,12 @@ class MainWindow(QMainWindow):
         self.highlighter.set_font_id(font_id)
 
     def _on_zoom_changed(self, value):
+        self._preview_user_zoomed = True
         self.zoom_label.setText(f"{value}%")
         self._apply_zoom_to_preview()
 
     def _on_zoom_changed_external(self, value):
+        self._preview_user_zoomed = True
         self.zoom_slider.blockSignals(True)
         self.zoom_slider.setValue(value)
         self.zoom_slider.blockSignals(False)
@@ -568,6 +603,27 @@ class MainWindow(QMainWindow):
 
     def _get_preview_zoom_factor(self):
         return self.zoom_slider.value() / 100.0
+
+    def _fit_zoom_factor(self, img_w, img_h):
+        vp = self.preview_scroll.viewport().size()
+        avail_w, avail_h = vp.width(), vp.height()
+        if img_w > avail_w or img_h > avail_h:
+            extent = QApplication.style().pixelMetric(QStyle.PM_ScrollBarExtent)
+            avail_w = max(50, avail_w - extent)
+            avail_h = max(50, avail_h - extent)
+        return min(1.0, avail_w / img_w, avail_h / img_h)
+
+    def fit_preview(self):
+        self._preview_user_zoomed = False
+        if self._last_preview is not None:
+            self._display_preview_image(*self._last_preview)
+        else:
+            self.schedule_preview_update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self._preview_user_zoomed and self._last_preview is not None:
+            self.preview_timer.start()
 
     def update_generate_button_state(self):
         has_text = bool(self.text_input.toPlainText().strip())
@@ -592,13 +648,23 @@ class MainWindow(QMainWindow):
         self.dimensions_label.setText("Resolution: -")
 
     def _display_preview_image(self, pil_image, scale):
-        zoom_factor = self._get_preview_zoom_factor()
-        width = int(pil_image.width * scale * zoom_factor)
-        height = int(pil_image.height * scale * zoom_factor)
+        self._last_preview = (pil_image, scale)
 
-        self.dimensions_label.setText(
-            f"Resolution: {pil_image.width * scale} x {pil_image.height * scale}"
-        )
+        out_w = pil_image.width * scale
+        out_h = pil_image.height * scale
+        self.dimensions_label.setText(f"Resolution: {out_w} x {out_h}")
+
+        zoom_factor = self._get_preview_zoom_factor()
+        if not self._preview_user_zoomed:
+            zoom_factor = self._fit_zoom_factor(out_w, out_h)
+            pct = max(1, int(round(zoom_factor * 100)))
+            self.zoom_slider.blockSignals(True)
+            self.zoom_slider.setValue(max(ZOOM_MIN, min(ZOOM_MAX, pct)))
+            self.zoom_slider.blockSignals(False)
+            self.zoom_label.setText(f"{pct}%")
+
+        width = int(out_w * zoom_factor)
+        height = int(out_h * zoom_factor)
 
         if width > PREVIEW_MAX_DIMENSION or height > PREVIEW_MAX_DIMENSION:
             self._set_preview_error(
@@ -610,11 +676,9 @@ class MainWindow(QMainWindow):
 
         preview_image = pil_image.copy()
 
-        if scale > 1 or zoom_factor != 1.0:
-            new_w = int(pil_image.width * scale * zoom_factor)
-            new_h = int(pil_image.height * scale * zoom_factor)
+        if width != pil_image.width or height != pil_image.height:
             preview_image = preview_image.resize(
-                (new_w, new_h), PILImage.Resampling.NEAREST
+                (max(1, width), max(1, height)), PILImage.Resampling.NEAREST
             )
 
         from PIL import ImageQt
@@ -623,6 +687,7 @@ class MainWindow(QMainWindow):
         pixmap = QPixmap.fromImage(qimage)
         self.preview_label.setPixmap(pixmap)
         self.preview_label.adjustSize()
+        self.preview_scroll.update_alignment()
 
         if pixmap.isNull():
             self._set_preview_error("Preview unavailable")

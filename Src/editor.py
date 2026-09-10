@@ -1,17 +1,19 @@
+from math import ceil, cos, radians, sin
 from pathlib import Path
 from time import time
 
 from PIL import Image, ImageQt
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import (QColor, QIcon, QKeySequence, QPalette, QPen,
-                           QPixmap, QShortcut)
+from PySide6.QtGui import (QColor, QIcon, QKeySequence, QPen, QPixmap,
+                           QShortcut)
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFormLayout,
-                               QGraphicsItem, QGraphicsLineItem,
+                               QFrame, QGraphicsItem, QGraphicsLineItem,
                                QGraphicsPixmapItem, QGraphicsRectItem,
-                               QGraphicsScene, QGraphicsView, QGroupBox,
-                               QHBoxLayout, QInputDialog, QLabel, QMenu,
-                               QMessageBox, QPushButton, QScrollArea, QSlider,
-                               QSpinBox, QSplitter, QVBoxLayout, QWidget)
+                               QGraphicsScene, QGraphicsView, QGridLayout,
+                               QGroupBox, QHBoxLayout, QInputDialog, QLabel,
+                               QMenu, QMessageBox, QPushButton, QScrollArea,
+                               QSlider, QSpinBox, QSplitter, QVBoxLayout,
+                               QWidget)
 
 from image_generation import (create_character_image, generate_filename,
                               get_font_paths, layout_characters)
@@ -30,8 +32,8 @@ ZOOM_STEP = 1.15
 ZOOM_MIN_FACTOR = 0.1
 ZOOM_MAX_FACTOR = 8.0
 
-CHAR_SCALE_MIN = 50
-CHAR_SCALE_MAX = 200
+CHAR_SCALE_MIN = 10
+CHAR_SCALE_MAX = 400
 CHAR_SCALE_DEFAULT = 100
 
 ROTATION_MIN = -180
@@ -43,8 +45,16 @@ LINE_SPACING_DEFAULT = 15
 LINE_SPACING_MAX = 200
 SNAP_GRID_DEFAULT = 10
 SNAP_GRID_MAX = 100
-SNAP_THRESHOLD_PX = 8
+SNAP_THRESHOLD_PX = 10
 SNAP_GUIDE_COLOR = "#ff00ae"
+SNAP_DISABLED_MODIFIER = Qt.KeyboardModifier.AltModifier
+
+NUDGE_STEP = 1
+NUDGE_BIG_STEP = 10
+
+GRID_LINE_COLOR = QColor(128, 128, 128, 60)
+CANVAS_FILL_COLOR = QColor(128, 128, 128, 28)
+GRID_MIN_SCREEN_PX = 7
 
 BASELINES = ["Bottom", "Center", "Top"]
 ALIGNMENTS = ["Left", "Center", "Right"]
@@ -121,21 +131,6 @@ class CharItem(QGraphicsPixmapItem):
     def _cache_key(self):
         return (self.scale_pct, self.rotation)
 
-    def itemChange(self, change, value):
-        scene = self.scene()
-        if (
-            change == QGraphicsItem.GraphicsItemChange.ItemPositionChange
-            and scene is not None
-            and scene.snap_size > 0
-            and not scene.suppress_grid
-            and isinstance(value, QPointF)
-        ):
-            snap = scene.snap_size
-            value = QPointF(
-                round(value.x() / snap) * snap, round(value.y() / snap) * snap
-            )
-        return super().itemChange(change, value)
-
     def update_pixmap(self):
         key = self._cache_key()
         rendered = self._pix_cache.get(key)
@@ -167,7 +162,7 @@ class EditorScene(QGraphicsScene):
     drag_started = Signal()
     drag_finished = Signal()
     snap_size = 0
-    suppress_grid = False
+    snapping_enabled = True
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -176,7 +171,7 @@ class EditorScene(QGraphicsScene):
 
     def mouseMoveEvent(self, event):
         super().mouseMoveEvent(event)
-        self._apply_object_snap()
+        self._apply_object_snap(event.modifiers())
 
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
@@ -194,7 +189,8 @@ class EditorScene(QGraphicsScene):
     def _guide_items(self):
         if not hasattr(self, "_guide_v"):
             pen = QPen(QColor(SNAP_GUIDE_COLOR))
-            pen.setWidthF(0)
+            pen.setCosmetic(True)
+            pen.setWidthF(1)
             self._guide_v = QGraphicsLineItem()
             self._guide_h = QGraphicsLineItem()
             for item in (self._guide_v, self._guide_h):
@@ -209,58 +205,71 @@ class EditorScene(QGraphicsScene):
             self._guide_v.hide()
             self._guide_h.hide()
 
-    def _sprite_scene_rect(self, item):
-        r = QRectF(0, 0, item.sprite.width, item.sprite.height)
-        return item.mapRectToScene(r)
+    def _item_scene_rect(self, item):
+        return item.mapRectToScene(item.boundingRect())
 
     def _moving_rect(self, movers):
         rect = None
         for item, _start in movers:
-            r = self._sprite_scene_rect(item)
+            r = self._item_scene_rect(item)
             rect = r if rect is None else rect.united(r)
         return rect
 
-    def _best_snap(self, edges, targets):
-        best_delta = 0.0
-        best_guide = None
+    def _snap_axis(self, edges, targets, box, axis):
+        if not hasattr(self, "_snap_threshold"):
+            return 0.0, None
+        candidates = []
         for edge in edges:
-            for target in targets:
-                delta = target - edge
-                if abs(delta) <= self._snap_threshold and (
-                    best_guide is None or abs(delta) < abs(best_delta)
-                ):
-                    best_delta = delta
-                    best_guide = target
-        return best_delta, best_guide
+            for coord, item in targets:
+                delta = coord - edge
+                dist = abs(delta)
+                if dist > self._snap_threshold:
+                    continue
+                # Prefer placements that sit NEXT TO the other sprite
+                # rather than stacked on top of it (Figma-style ties).
+                overlap = False
+                if item is not None:
+                    probe = (
+                        box.translated(delta, 0)
+                        if axis == "x"
+                        else box.translated(0, delta)
+                    )
+                    # Shrink so edge-touching does not count as overlap.
+                    probe = probe.adjusted(0.01, 0.01, -0.01, -0.01)
+                    overlap = probe.intersects(self._snap_rects[id(item)])
+                candidates.append((dist, delta, coord, overlap))
+        if not candidates:
+            return 0.0, None
+        min_dist = min(c[0] for c in candidates)
+        tied = [c for c in candidates if c[0] <= min_dist + 0.75]
+        tied.sort(key=lambda c: (c[3], c[0]))
+        _dist, delta, coord, _overlap = tied[0]
+        return delta, coord
 
     def _compute_snap_targets(self, movers):
         moving = {id(item) for item, _start in movers}
         xs = []
         ys = []
+        rects = {}
         canvas_w, canvas_h = self.parent_dialog.canvas_size
-        xs += [0, canvas_w / 2, canvas_w]
-        ys += [0, canvas_h / 2, canvas_h]
+        xs += [(0, None), (canvas_w / 2, None), (canvas_w, None)]
+        ys += [(0, None), (canvas_h / 2, None), (canvas_h, None)]
         for item in self.parent_dialog.items:
             if not item.isVisible() or id(item) in moving:
                 continue
-            r = self._sprite_scene_rect(item)
-            xs += [r.left(), r.center().x(), r.right()]
-            ys += [r.top(), r.center().y(), r.bottom()]
-            if item.layout_anchored:
-                xs += [
-                    item.base_x,
-                    item.base_x + item.sprite.width / 2,
-                    item.base_x + item.sprite.width,
-                ]
-                ys += [
-                    item.base_y,
-                    item.base_y + item.sprite.height / 2,
-                    item.base_y + item.sprite.height,
-                ]
+            r = self._item_scene_rect(item)
+            rects[id(item)] = r
+            xs += [(r.left(), item), (r.center().x(), item), (r.right(), item)]
+            ys += [(r.top(), item), (r.center().y(), item), (r.bottom(), item)]
         self._snap_targets = (xs, ys)
+        self._snap_rects = rects
 
-    def _apply_object_snap(self):
-        if self.snap_size <= 0 or not hasattr(self, "_snap_start"):
+    def _apply_object_snap(self, modifiers=None):
+        if (
+            not self.snapping_enabled
+            or not hasattr(self, "_snap_start")
+            or (modifiers is not None and modifiers & SNAP_DISABLED_MODIFIER)
+        ):
             self._hide_guides()
             return
         movers = [
@@ -282,34 +291,72 @@ class EditorScene(QGraphicsScene):
         zoom = max(0.05, abs(view.transform().m11()))
         self._snap_threshold = SNAP_THRESHOLD_PX / zoom
 
-        sx, guide_x = self._best_snap(
-            (box.left(), box.center().x(), box.right()), self._snap_targets[0]
+        sx, guide_x = self._snap_axis(
+            (box.left(), box.center().x(), box.right()), self._snap_targets[0],
+            box, "x",
         )
-        sy, guide_y = self._best_snap(
-            (box.top(), box.center().y(), box.bottom()), self._snap_targets[1]
+        sy, guide_y = self._snap_axis(
+            (box.top(), box.center().y(), box.bottom()), self._snap_targets[1],
+            box, "y",
         )
 
-        if sx == 0 and sy == 0:
+        guide_x_target = guide_x if sx else None
+        guide_y_target = guide_y if sy else None
+
+        if not sx and not sy and self.snap_size > 0:
+            grid = self.snap_size
+            sx = round(box.left() / grid) * grid - box.left()
+            sy = round(box.top() / grid) * grid - box.top()
+
+        if not sx and not sy:
             self._hide_guides()
             return
 
-        self.suppress_grid = True
         for item, start in movers:
             item.setPos(start + translation + QPointF(sx, sy))
-        self.suppress_grid = False
 
         guide_v, guide_h = self._guide_items()
         scene_rect = self.sceneRect()
-        if guide_x is not None:
-            guide_v.setLine(guide_x, scene_rect.top(), guide_x, scene_rect.bottom())
+        if guide_x_target is not None:
+            guide_v.setLine(
+                guide_x_target, scene_rect.top(),
+                guide_x_target, scene_rect.bottom(),
+            )
             guide_v.show()
         else:
             guide_v.hide()
-        if guide_y is not None:
-            guide_h.setLine(scene_rect.left(), guide_y, scene_rect.right(), guide_y)
+        if guide_y_target is not None:
+            guide_h.setLine(
+                scene_rect.left(), guide_y_target,
+                scene_rect.right(), guide_y_target,
+            )
             guide_h.show()
         else:
             guide_h.hide()
+
+    def drawBackground(self, painter, rect):
+        super().drawBackground(painter, rect)
+        canvas = QRectF(0, 0, *self.parent_dialog.canvas_size)
+        exposed = rect.intersected(canvas)
+        if exposed.isNull():
+            return
+        painter.fillRect(exposed, CANVAS_FILL_COLOR)
+        if not self.snapping_enabled or self.snap_size <= 0:
+            return
+        views = self.views()
+        zoom = abs(views[0].transform().m11()) if views else 1.0
+        step = float(self.snap_size)
+        while step * zoom < GRID_MIN_SCREEN_PX:
+            step *= 2
+        painter.setPen(QPen(GRID_LINE_COLOR, 0))
+        x = ceil(exposed.left() / step) * step
+        while x <= exposed.right():
+            painter.drawLine(QPointF(x, exposed.top()), QPointF(x, exposed.bottom()))
+            x += step
+        y = ceil(exposed.top() / step) * step
+        while y <= exposed.bottom():
+            painter.drawLine(QPointF(exposed.left(), y), QPointF(exposed.right(), y))
+            y += step
 
     def mouseDoubleClickEvent(self, event):
         item = self.itemAt(event.scenePos(), self.views()[0].transform())
@@ -339,18 +386,25 @@ class EditorView(QGraphicsView):
         super().__init__(scene, parent)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setFrameShape(QFrame.Shape.NoFrame)
         self._pan_start = None
 
+    def zoom_by(self, factor):
+        current = self.transform().m11()
+        target = max(ZOOM_MIN_FACTOR, min(ZOOM_MAX_FACTOR, current * factor))
+        if abs(target - current) < 1e-9:
+            return
+        self.setTransform(self.transform().scale(target / current, target / current))
+        self.zoom_changed.emit(self.transform().m11())
+
     def wheelEvent(self, event):
-        if event.modifiers() & Qt.ControlModifier:
-            factor = ZOOM_STEP if event.angleDelta().y() > 0 else 1 / ZOOM_STEP
-            current = self.transform().m11()
-            if current * factor < ZOOM_MIN_FACTOR:
-                factor = ZOOM_MIN_FACTOR / current
-            elif current * factor > ZOOM_MAX_FACTOR:
-                factor = ZOOM_MAX_FACTOR / current
-            self.setTransform(self.transform().scale(factor, factor))
-            self.zoom_changed.emit(self.transform().m11())
+        delta = event.angleDelta()
+        if event.modifiers() & Qt.ShiftModifier and delta.y():
+            bar = self.horizontalScrollBar()
+            bar.setValue(bar.value() - delta.y())
+            event.accept()
+        elif delta.y():
+            self.zoom_by(ZOOM_STEP if delta.y() > 0 else 1 / ZOOM_STEP)
             event.accept()
         else:
             super().wheelEvent(event)
@@ -453,13 +507,15 @@ class AdvancedEditorDialog(QDialog):
         self.scene = EditorScene(self)
         self.scene.parent_dialog = self
         self.scene.snap_size = SNAP_GRID_DEFAULT
+        self.scene.snapping_enabled = True
         self.view = EditorView(self.scene)
         self.view.setToolTip(
             "Drag characters to move them (Ctrl+click or drag a box to "
             "select several). Double-click a character to replace it. "
-            "Ctrl + mouse wheel to zoom, drag with the middle button to "
-            "pan. While snapping is on, characters click onto other "
-            "characters' edges, centres and baselines."
+            "Mouse wheel zooms, Shift + wheel scrolls sideways, middle "
+            "button drags to pan. Characters snap to other characters' "
+            "edges, centres and baselines (magenta guides); hold Alt to "
+            "suspend snapping while dragging."
         )
 
         placements, (canvas_w, canvas_h) = layout_characters(
@@ -474,9 +530,7 @@ class AdvancedEditorDialog(QDialog):
         self.canvas_size = (canvas_w, canvas_h)
 
         self.canvas_rect = QGraphicsRectItem(0, 0, canvas_w, canvas_h)
-        pen = self.canvas_rect.pen()
-        pen.setColor(self.palette().color(QPalette.ColorRole.Mid))
-        self.canvas_rect.setPen(pen)
+        self.canvas_rect.setPen(Qt.NoPen)
         self.canvas_rect.setZValue(-1)
         self.scene.addItem(self.canvas_rect)
 
@@ -542,7 +596,9 @@ class AdvancedEditorDialog(QDialog):
         for first, second in (
             (self.offset_x_spin, self.offset_y_spin),
             (self.offset_y_spin, self.scale_slider),
-            (self.scale_slider, self.rotation_spin),
+            (self.scale_slider, self.scale_spin),
+            (self.scale_spin, self.rotation_slider),
+            (self.rotation_slider, self.rotation_spin),
             (self.rotation_spin, self.letter_spacing_spin),
             (self.letter_spacing_spin, self.line_spacing_spin),
             (self.line_spacing_spin, self.baseline_combo),
@@ -579,8 +635,20 @@ class AdvancedEditorDialog(QDialog):
         self.redo_btn.clicked.connect(self._redo)
         layout.addWidget(self.redo_btn)
 
+        self.zoom_out_btn = QPushButton("−")
+        self.zoom_out_btn.setFixedWidth(28)
+        self.zoom_out_btn.setToolTip("Zoom out (also: mouse wheel down, Ctrl+-).")
+        self.zoom_out_btn.clicked.connect(lambda: self.view.zoom_by(1 / ZOOM_STEP))
+        layout.addWidget(self.zoom_out_btn)
+
+        self.zoom_in_btn = QPushButton("+")
+        self.zoom_in_btn.setFixedWidth(28)
+        self.zoom_in_btn.setToolTip("Zoom in (also: mouse wheel up, Ctrl+=).")
+        self.zoom_in_btn.clicked.connect(lambda: self.view.zoom_by(ZOOM_STEP))
+        layout.addWidget(self.zoom_in_btn)
+
         self.fit_btn = QPushButton("Fit")
-        self.fit_btn.setToolTip("Zoom so the whole image is visible.")
+        self.fit_btn.setToolTip("Zoom so the whole image is visible (Ctrl+0).")
         self.fit_btn.clicked.connect(self._fit_view)
         layout.addWidget(self.fit_btn)
 
@@ -647,30 +715,93 @@ class AdvancedEditorDialog(QDialog):
         self.scale_slider.setRange(CHAR_SCALE_MIN, CHAR_SCALE_MAX)
         self.scale_slider.setValue(CHAR_SCALE_DEFAULT)
         self.scale_slider.setToolTip(
-            "Character size as a percentage of the original sprite."
+            "Size as a percentage of the original sprite. With several "
+            "characters selected they scale together around the "
+            "selection, keeping their spacing."
         )
-        self.scale_slider.valueChanged.connect(
-            lambda value: self._apply_char_property("scale_pct", value)
-        )
+        self.scale_spin = QSpinBox()
+        self.scale_spin.setRange(CHAR_SCALE_MIN, CHAR_SCALE_MAX)
+        self.scale_spin.setValue(CHAR_SCALE_DEFAULT)
+        self.scale_spin.setSuffix("%")
+        self.scale_spin.setToolTip("Type an exact size percentage.")
+        self.scale_slider.valueChanged.connect(self.scale_spin.setValue)
+        self.scale_spin.valueChanged.connect(self._on_scale_changed)
         scale_row = QHBoxLayout()
-        scale_row.addWidget(self.scale_slider)
-        self.scale_value_label = QLabel(f"{CHAR_SCALE_DEFAULT}%")
-        self.scale_value_label.setFixedWidth(40)
-        scale_row.addWidget(self.scale_value_label)
+        scale_row.addWidget(self.scale_slider, 1)
+        scale_row.addWidget(self.scale_spin)
         form.addRow("Scale %:", scale_row)
 
+        self.rotation_slider = QSlider(Qt.Horizontal)
+        self.rotation_slider.setRange(ROTATION_MIN, ROTATION_MAX)
+        self.rotation_slider.setValue(0)
+        self.rotation_slider.setTickPosition(QSlider.TicksBelow)
+        self.rotation_slider.setTickInterval(45)
+        self.rotation_slider.setToolTip(
+            "Clockwise rotation of the selected character(s)."
+        )
         self.rotation_spin = QSpinBox()
         self.rotation_spin.setRange(ROTATION_MIN, ROTATION_MAX)
         self.rotation_spin.setSuffix("°")
-        self.rotation_spin.setToolTip(
-            "Clockwise rotation of the selected character(s)."
-        )
-        self.rotation_spin.valueChanged.connect(
-            lambda value: self._apply_char_property("rotation", value)
-        )
-        form.addRow("Rotation:", self.rotation_spin)
+        self.rotation_spin.setToolTip("Type an exact rotation angle.")
+        self.rotation_slider.valueChanged.connect(self.rotation_spin.setValue)
+        self.rotation_spin.valueChanged.connect(self._on_rotation_changed)
+        rotation_row = QHBoxLayout()
+        rotation_row.addWidget(self.rotation_slider, 1)
+        rotation_row.addWidget(self.rotation_spin)
+        form.addRow("Rotation:", rotation_row)
+
+        form.addRow(self._build_selection_actions_row())
 
         return group
+
+    def _build_selection_actions_row(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        align_label = QLabel("Align selection (needs 2+):")
+        layout.addWidget(align_label)
+
+        align_row = QHBoxLayout()
+        align_row.setSpacing(4)
+        for text, mode in (
+            ("Left", "left"), ("Center", "center"), ("Right", "right"),
+        ):
+            btn = QPushButton(text)
+            btn.setToolTip(f"Align selected characters to the {mode} of the selection.")
+            btn.clicked.connect(lambda _, m=mode: self._align_selection(m))
+            align_row.addWidget(btn)
+        layout.addLayout(align_row)
+
+        align_row2 = QHBoxLayout()
+        align_row2.setSpacing(4)
+        for text, mode in (
+            ("Top", "top"), ("Middle", "middle"), ("Bottom", "bottom"),
+        ):
+            btn = QPushButton(text)
+            btn.setToolTip(f"Align selected characters to the {mode} of the selection.")
+            btn.clicked.connect(lambda _, m=mode: self._align_selection(m))
+            align_row2.addWidget(btn)
+        layout.addLayout(align_row2)
+
+        spread_row = QHBoxLayout()
+        spread_row.setSpacing(4)
+        spread_h = QPushButton("Spread ↔")
+        spread_h.setToolTip(
+            "Distribute selected characters with even horizontal spacing."
+        )
+        spread_h.clicked.connect(lambda: self._distribute_selection("x"))
+        spread_v = QPushButton("Spread ↕")
+        spread_v.setToolTip(
+            "Distribute selected characters with even vertical spacing."
+        )
+        spread_v.clicked.connect(lambda: self._distribute_selection("y"))
+        spread_row.addWidget(spread_h)
+        spread_row.addWidget(spread_v)
+        layout.addLayout(spread_row)
+
+        return widget
 
     def _build_global_group(self):
         group = self._make_collapsible(QGroupBox("Spacing & Alignment"))
@@ -706,17 +837,27 @@ class AdvancedEditorDialog(QDialog):
         self.align_combo.currentTextChanged.connect(self._on_layout_changed)
         form.addRow("Line align:", self.align_combo)
 
+        self.snap_enable_cb = QCheckBox("Enabled")
+        self.snap_enable_cb.setChecked(True)
+        self.snap_enable_cb.setToolTip(
+            "Snap characters to other characters' edges, centres and "
+            "baselines, to the canvas edges and to the grid below. "
+            "Hold Alt while dragging to suspend snapping temporarily."
+        )
+        self.snap_enable_cb.toggled.connect(self._on_snapping_toggled)
+        form.addRow("Snapping:", self.snap_enable_cb)
+
         self.snap_spin = QSpinBox()
         self.snap_spin.setRange(0, SNAP_GRID_MAX)
         self.snap_spin.setValue(SNAP_GRID_DEFAULT)
         self.snap_spin.setSpecialValueText("Off")
         self.snap_spin.setToolTip(
-            "While dragging, characters snap to other characters' "
-            "edges, centres and baselines (magenta guides), and to a "
-            "grid of this many pixels otherwise. 0 disables snapping."
+            "Fallback grid used when no character, edge or centre is "
+            "nearby. 0 disables grid snapping (smart snapping to other "
+            "characters still works)."
         )
         self.snap_spin.valueChanged.connect(self._on_snap_changed)
-        form.addRow("Snap to grid:", self.snap_spin)
+        form.addRow("Grid size:", self.snap_spin)
 
         return group
 
@@ -728,6 +869,39 @@ class AdvancedEditorDialog(QDialog):
         del_sc = QShortcut(QKeySequence.StandardKey.Delete, self.view)
         del_sc.setContext(Qt.ShortcutContext.WidgetShortcut)
         del_sc.activated.connect(self._delete_selected)
+
+        zoom_in_sc = QShortcut(QKeySequence("Ctrl+="), self)
+        zoom_in_sc.activated.connect(lambda: self.view.zoom_by(ZOOM_STEP))
+        zoom_out_sc = QShortcut(QKeySequence("Ctrl+-"), self)
+        zoom_out_sc.activated.connect(lambda: self.view.zoom_by(1 / ZOOM_STEP))
+        fit_sc = QShortcut(QKeySequence("Ctrl+0"), self)
+        fit_sc.activated.connect(self._fit_view)
+
+        for key, (ddx, ddy) in (
+            ("Left", (-NUDGE_STEP, 0)),
+            ("Right", (NUDGE_STEP, 0)),
+            ("Up", (0, -NUDGE_STEP)),
+            ("Down", (0, NUDGE_STEP)),
+            ("Shift+Left", (-NUDGE_BIG_STEP, 0)),
+            ("Shift+Right", (NUDGE_BIG_STEP, 0)),
+            ("Shift+Up", (0, -NUDGE_BIG_STEP)),
+            ("Shift+Down", (0, NUDGE_BIG_STEP)),
+        ):
+            sc = QShortcut(QKeySequence(key), self.view)
+            sc.setContext(Qt.ShortcutContext.WidgetShortcut)
+            sc.activated.connect(lambda ddx=ddx, ddy=ddy: self._nudge(ddx, ddy))
+
+    def _nudge(self, dx, dy):
+        selected = self._selected()
+        if not selected:
+            return
+        before = self._snapshot_selected()
+        for item in selected:
+            item.dx += dx
+            item.dy += dy
+            item._place()
+        self._push(before)
+        self._sync_panel()
 
     def _delete_selected(self):
         selected = self._selected()
@@ -806,24 +980,27 @@ class AdvancedEditorDialog(QDialog):
             self.offset_x_spin,
             self.offset_y_spin,
             self.scale_slider,
+            self.scale_spin,
+            self.rotation_slider,
             self.rotation_spin,
         ):
             widget.blockSignals(True)
         try:
-            self.scale_value_label.setText(
-                f"{selected[0].scale_pct}%" if selected else "-"
-            )
             if selected:
                 first = selected[0]
-                self.offset_x_spin.setValue(first.dx)
-                self.offset_y_spin.setValue(first.dy)
+                self.offset_x_spin.setValue(int(round(first.dx)))
+                self.offset_y_spin.setValue(int(round(first.dy)))
                 self.scale_slider.setValue(first.scale_pct)
+                self.scale_spin.setValue(first.scale_pct)
+                self.rotation_slider.setValue(first.rotation)
                 self.rotation_spin.setValue(first.rotation)
         finally:
             for widget in (
                 self.offset_x_spin,
                 self.offset_y_spin,
                 self.scale_slider,
+                self.scale_spin,
+                self.rotation_slider,
                 self.rotation_spin,
             ):
                 widget.blockSignals(False)
@@ -831,13 +1008,114 @@ class AdvancedEditorDialog(QDialog):
         self._update_status_counts()
 
     def _apply_char_property(self, attr, value):
-        selected = self._selected()
+        selected = [item for item in self._selected() if item.isVisible()]
         if not selected:
             return
         before = self._snapshot_selected()
-        for item in selected:
-            setattr(item, attr, value)
+        if attr == "scale_pct":
+            self._scale_selection(selected, value)
+        else:
+            for item in selected:
+                setattr(item, attr, value)
+                item.update_pixmap()
+        self._push(before)
+        self._sync_panel()
+
+    def _rendered_size(self, item, scale_pct):
+        w = item.sprite.width * scale_pct / 100.0
+        h = item.sprite.height * scale_pct / 100.0
+        if item.rotation:
+            rad = radians(abs(item.rotation))
+            c, s = cos(rad), sin(rad)
+            w, h = abs(w * c) + abs(h * s), abs(w * s) + abs(h * c)
+        return w, h
+
+    def _scale_selection(self, items, value):
+        # Scale every character around the centre of the whole selection
+        # so grouped characters keep their relative spacing instead of
+        # piling up on each other.
+        rects = {item: self.scene._item_scene_rect(item) for item in items}
+        union = rects[items[0]]
+        for rect in rects.values():
+            union = union.united(rect)
+        cx, cy = union.center().x(), union.center().y()
+        for item in items:
+            old_scale = item.scale_pct or CHAR_SCALE_DEFAULT
+            factor = value / old_scale
+            rect = rects[item]
+            new_cx = cx + (rect.center().x() - cx) * factor
+            new_cy = cy + (rect.center().y() - cy) * factor
+            item.scale_pct = value
+            w, h = self._rendered_size(item, value)
+            item.dx = new_cx - w / 2 - item.base_x
+            item.dy = new_cy - h / 2 - item.base_y
             item.update_pixmap()
+
+    def _on_scale_changed(self, value):
+        self.scale_slider.blockSignals(True)
+        self.scale_slider.setValue(value)
+        self.scale_slider.blockSignals(False)
+        self._apply_char_property("scale_pct", value)
+
+    def _on_rotation_changed(self, value):
+        self.rotation_slider.blockSignals(True)
+        self.rotation_slider.setValue(value)
+        self.rotation_slider.blockSignals(False)
+        self._apply_char_property("rotation", value)
+
+    def _align_selection(self, mode):
+        items = [item for item in self._selected() if item.isVisible()]
+        if len(items) < 2:
+            return
+        before = self._snapshot_selected()
+        rects = {item: self.scene._item_scene_rect(item) for item in items}
+        union = rects[items[0]]
+        for rect in rects.values():
+            union = union.united(rect)
+        for item, rect in rects.items():
+            if mode == "left":
+                delta = union.left() - rect.left()
+                ddx, ddy = delta, 0
+            elif mode == "right":
+                ddx, ddy = union.right() - rect.right(), 0
+            elif mode == "center":
+                ddx, ddy = union.center().x() - rect.center().x(), 0
+            elif mode == "top":
+                ddx, ddy = 0, union.top() - rect.top()
+            elif mode == "bottom":
+                ddx, ddy = 0, union.bottom() - rect.bottom()
+            else:  # middle
+                ddx, ddy = 0, union.center().y() - rect.center().y()
+            if ddx or ddy:
+                item.dx += ddx
+                item.dy += ddy
+                item._place()
+        self._push(before)
+        self._sync_panel()
+
+    def _distribute_selection(self, axis):
+        items = [item for item in self._selected() if item.isVisible()]
+        if len(items) < 3:
+            return
+        before = self._snapshot_selected()
+        rects = {item: self.scene._item_scene_rect(item) for item in items}
+        ordered = sorted(items, key=lambda it: rects[it].center().x() if axis == "x"
+                         else rects[it].center().y())
+        first = rects[ordered[0]].center()
+        last = rects[ordered[-1]].center()
+        span = (last.x() - first.x()) if axis == "x" else (last.y() - first.y())
+        step = span / (len(ordered) - 1)
+        for index, item in enumerate(ordered[1:-1], start=1):
+            rect = rects[item]
+            if axis == "x":
+                delta = first.x() + index * step - rect.center().x()
+                if delta:
+                    item.dx += delta
+            else:
+                delta = first.y() + index * step - rect.center().y()
+                if delta:
+                    item.dy += delta
+            item._place()
         self._push(before)
         self._sync_panel()
 
@@ -944,10 +1222,12 @@ class AdvancedEditorDialog(QDialog):
         return True
 
     def _reset_item(self, item, attr):
-        default = CHAR_SCALE_DEFAULT if attr == "scale_pct" else 0
         before = {item: item.capture_state()}
-        setattr(item, attr, default)
-        item.update_pixmap()
+        if attr == "scale_pct":
+            self._scale_selection([item], CHAR_SCALE_DEFAULT)
+        else:
+            item.rotation = 0
+            item.update_pixmap()
         self._push(before)
         self._sync_panel()
 
@@ -1034,6 +1314,15 @@ class AdvancedEditorDialog(QDialog):
     def _on_snap_changed(self, value):
         self.snap_grid = value
         self.scene.snap_size = value
+        if value > 0:
+            self.scene.invalidate(self.scene.sceneRect(),
+                                  QGraphicsScene.SceneLayer.BackgroundLayer)
+
+    def _on_snapping_toggled(self, checked):
+        self.scene.snapping_enabled = checked
+        self.snap_spin.setEnabled(checked)
+        self.scene.invalidate(self.scene.sceneRect(),
+                              QGraphicsScene.SceneLayer.BackgroundLayer)
 
     def export_image(self):
         try:
