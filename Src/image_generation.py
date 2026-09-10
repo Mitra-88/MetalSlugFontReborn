@@ -24,6 +24,7 @@ FONTS_BASE_DIR = PROJECT_ROOT / "Assets" / "Fonts"
 
 _CHAR_IMAGE_CACHE = {}
 
+
 def generate_filename(_=None):
     return f"{uuid4().hex}{IMAGE_EXTENSION}"
 

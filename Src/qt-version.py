@@ -13,15 +13,15 @@ from PySide6.QtGui import (QColor, QDesktopServices, QFont, QGradient, QIcon,
                            QPixmap, QSyntaxHighlighter, QTextCharFormat)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QFileDialog, QFrame,
-                               QGridLayout, QGraphicsOpacityEffect, QGroupBox,
+                               QGraphicsOpacityEffect, QGridLayout, QGroupBox,
                                QHBoxLayout, QLabel, QMainWindow, QMessageBox,
                                QPlainTextEdit, QPushButton, QScrollArea,
                                QSlider, QStyle, QVBoxLayout, QWidget)
 
 from editor import AdvancedEditorDialog
 from image_generation import generate_filename, generate_image, get_font_paths
-from qt_utils import (ViewSupportedButton, about_section,
-                      load_config, save_config, set_theme)
+from qt_utils import (ViewSupportedButton, about_section, load_config,
+                      save_config, set_theme)
 from utils import readable_size
 
 DEFAULT_COMPRESS_LEVEL = 6
@@ -194,9 +194,7 @@ class PreviewScrollArea(QScrollArea):
         if widget is None:
             return
         vp = self.viewport().size()
-        if (
-            widget.width() > vp.width() or widget.height() > vp.height()
-        ):
+        if widget.width() > vp.width() or widget.height() > vp.height():
             self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         else:
             self.setAlignment(Qt.AlignCenter)
@@ -542,8 +540,7 @@ class MainWindow(QMainWindow):
         self.scale_select = QComboBox()
         self.scale_select.addItems(["1x (Native)", "2x", "3x", "4x"])
         self.scale_select.setToolTip(
-            "Make the exported image larger. 1x matches the game's native "
-            "resolution."
+            "Make the exported image larger. 1x matches the game's native resolution."
         )
         self.scale_select.currentIndexChanged.connect(self.schedule_preview_update)
         grid.addWidget(self.scale_select, 0, 1)

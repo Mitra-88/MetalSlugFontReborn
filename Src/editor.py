@@ -5,17 +5,15 @@ from time import time
 
 from PIL import Image, ImageQt
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import (QColor, QIcon, QKeySequence, QPen, QPixmap,
-                           QShortcut)
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QFormLayout, QFrame, QGraphicsItem,
                                QGraphicsLineItem, QGraphicsPixmapItem,
                                QGraphicsRectItem, QGraphicsScene,
-                               QGraphicsView, QGridLayout, QGroupBox,
-                               QHBoxLayout, QInputDialog, QLabel, QMenu,
-                               QMessageBox, QPushButton, QScrollArea,
-                               QSlider, QSpinBox, QSplitter, QVBoxLayout,
-                               QWidget)
+                               QGraphicsView, QGroupBox, QHBoxLayout,
+                               QInputDialog, QLabel, QMenu, QMessageBox,
+                               QPushButton, QScrollArea, QSlider, QSpinBox,
+                               QSplitter, QVBoxLayout, QWidget)
 
 from image_generation import (create_character_image, generate_filename,
                               get_font_paths, layout_characters)
@@ -81,7 +79,6 @@ class _SnapCandidate:
 
 
 class SnapEngine:
-
     def __init__(self):
         self.reset()
 
@@ -110,7 +107,9 @@ class SnapEngine:
         self._x_by_left = sorted(self._statics, key=lambda kv: (kv[1].left(), kv[0]))
         self._x_by_right = sorted(self._statics, key=lambda kv: (kv[1].right(), kv[0]))
         self._y_by_top = sorted(self._statics, key=lambda kv: (kv[1].top(), kv[0]))
-        self._y_by_bottom = sorted(self._statics, key=lambda kv: (kv[1].bottom(), kv[0]))
+        self._y_by_bottom = sorted(
+            self._statics, key=lambda kv: (kv[1].bottom(), kv[0])
+        )
 
     def find_snap(self, box, threshold, grid):
         dx, guides_x = self._snap_one_axis(box, threshold, grid, True)
@@ -128,9 +127,7 @@ class SnapEngine:
         for tier in tiers:
             candidates = tier()
             if candidates:
-                best = min(
-                    candidates, key=lambda c: (abs(c.delta), c.coord, c.delta)
-                )
+                best = min(candidates, key=lambda c: (abs(c.delta), c.coord, c.delta))
                 return best.delta, best.guides
         return 0.0, []
 
@@ -144,32 +141,45 @@ class SnapEngine:
 
     def _tier_char_edges(self, box, threshold, horizontal):
         table = self._xs[0] if horizontal else self._ys[0]
-        return self._match_edges(self._moving_edges(box, horizontal), table,
-                                 threshold, GuideStyle.EDGE, horizontal)
+        return self._match_edges(
+            self._moving_edges(box, horizontal),
+            table,
+            threshold,
+            GuideStyle.EDGE,
+            horizontal,
+        )
 
     def _tier_char_centers(self, box, threshold, horizontal):
         table = self._xs[1] if horizontal else self._ys[1]
-        return self._match_edges((self._moving_center(box, horizontal),), table,
-                                 threshold, GuideStyle.CENTER, horizontal)
+        return self._match_edges(
+            (self._moving_center(box, horizontal),),
+            table,
+            threshold,
+            GuideStyle.CENTER,
+            horizontal,
+        )
 
     def _tier_canvas(self, box, threshold, horizontal):
         size = self._canvas_w if horizontal else self._canvas_h
-        edge_targets = ((0.0, GuideStyle.EDGE), (size, GuideStyle.EDGE),
-                        (size / 2.0, GuideStyle.CENTER))
+        edge_targets = (
+            (0.0, GuideStyle.EDGE),
+            (size, GuideStyle.EDGE),
+            (size / 2.0, GuideStyle.CENTER),
+        )
         center_targets = ((size / 2.0, GuideStyle.CENTER),)
         out = []
         for edge in self._moving_edges(box, horizontal):
             for coord, style in edge_targets:
                 delta = coord - edge
                 if abs(delta) <= threshold:
-                    out.append(_SnapCandidate(delta, coord,
-                                              [(horizontal, coord, style)]))
+                    out.append(
+                        _SnapCandidate(delta, coord, [(horizontal, coord, style)])
+                    )
         center = self._moving_center(box, horizontal)
         for coord, style in center_targets:
             delta = coord - center
             if abs(delta) <= threshold:
-                out.append(_SnapCandidate(delta, coord,
-                                          [(horizontal, coord, style)]))
+                out.append(_SnapCandidate(delta, coord, [(horizontal, coord, style)]))
         return out
 
     def _match_edges(self, moving, table, threshold, style, horizontal):
@@ -178,8 +188,9 @@ class SnapEngine:
             for coord, key in table:
                 delta = coord - edge
                 if abs(delta) <= threshold:
-                    out.append(_SnapCandidate(delta, coord,
-                                              [(horizontal, coord, style)]))
+                    out.append(
+                        _SnapCandidate(delta, coord, [(horizontal, coord, style)])
+                    )
         return out
 
     def _tier_spacing(self, box, threshold, horizontal):
@@ -196,13 +207,24 @@ class SnapEngine:
             right_edge_of = lambda r: r.top()
             before, after = self._y_by_bottom, self._y_by_top
 
-        near_left = self._nearest_before(before, left_edge_of,
-                                         first + threshold, perp_lo, perp_hi,
-                                         threshold, horizontal)
-        near_right = self._nearest_after(after, right_edge_of,
-                                         first + span - threshold,
-                                         perp_lo, perp_hi, threshold,
-                                         horizontal)
+        near_left = self._nearest_before(
+            before,
+            left_edge_of,
+            first + threshold,
+            perp_lo,
+            perp_hi,
+            threshold,
+            horizontal,
+        )
+        near_right = self._nearest_after(
+            after,
+            right_edge_of,
+            first + span - threshold,
+            perp_lo,
+            perp_hi,
+            threshold,
+            horizontal,
+        )
         if near_left is None or near_right is None:
             return []
 
@@ -217,31 +239,34 @@ class SnapEngine:
             return []
         return [
             _SnapCandidate(
-                delta, target,
-                [(horizontal, bound_a, GuideStyle.SPACING),
-                 (horizontal, bound_b, GuideStyle.SPACING)],
+                delta,
+                target,
+                [
+                    (horizontal, bound_a, GuideStyle.SPACING),
+                    (horizontal, bound_b, GuideStyle.SPACING),
+                ],
             )
         ]
 
-    def _nearest_before(self, ordered, edge_of, limit, perp_lo, perp_hi,
-                        threshold, horizontal):
+    def _nearest_before(
+        self, ordered, edge_of, limit, perp_lo, perp_hi, threshold, horizontal
+    ):
         best = None
         for key, rect in ordered:
             value = edge_of(rect)
             if value > limit:
                 break
-            if self._perpendicular_close(rect, perp_lo, perp_hi, threshold,
-                                         horizontal):
+            if self._perpendicular_close(rect, perp_lo, perp_hi, threshold, horizontal):
                 best = (key, rect)
         return best
 
-    def _nearest_after(self, ordered, edge_of, limit, perp_lo, perp_hi,
-                       threshold, horizontal):
+    def _nearest_after(
+        self, ordered, edge_of, limit, perp_lo, perp_hi, threshold, horizontal
+    ):
         for key, rect in ordered:
             if edge_of(rect) < limit:
                 continue
-            if self._perpendicular_close(rect, perp_lo, perp_hi, threshold,
-                                         horizontal):
+            if self._perpendicular_close(rect, perp_lo, perp_hi, threshold, horizontal):
                 return (key, rect)
         return None
 
@@ -265,6 +290,7 @@ class SnapEngine:
             if best is None or abs(delta) < abs(best.delta):
                 best = _SnapCandidate(delta, snapped, [])
         return [best] if best is not None else []
+
 
 BASELINES = ["Bottom", "Center", "Top"]
 ALIGNMENTS = ["Left", "Center", "Right"]
@@ -390,9 +416,7 @@ class EditorScene(QGraphicsScene):
         if not (event.buttons() & Qt.LeftButton):
             self._hide_guides()
             return
-        raw_translation = (
-            event.scenePos() - event.buttonDownScenePos(Qt.LeftButton)
-        )
+        raw_translation = event.scenePos() - event.buttonDownScenePos(Qt.LeftButton)
         self._apply_object_snap(event.modifiers(), raw_translation)
 
     def mouseReleaseEvent(self, event):
@@ -410,9 +434,7 @@ class EditorScene(QGraphicsScene):
 
     def _item_scene_rect(self, item):
         pixmap = item.pixmap()
-        return item.mapRectToScene(
-            QRectF(0, 0, pixmap.width(), pixmap.height())
-        )
+        return item.mapRectToScene(QRectF(0, 0, pixmap.width(), pixmap.height()))
 
     def _gather_movers(self):
         if not hasattr(self, "_snap_start"):
@@ -451,9 +473,8 @@ class EditorScene(QGraphicsScene):
         if raw_translation is None:
             self._hide_guides()
             return
-        if (
-            not self.snapping_enabled
-            or (modifiers is not None and modifiers & SNAP_DISABLED_MODIFIER)
+        if not self.snapping_enabled or (
+            modifiers is not None and modifiers & SNAP_DISABLED_MODIFIER
         ):
             self._hide_guides()
             return
@@ -464,9 +485,7 @@ class EditorScene(QGraphicsScene):
         if not self._snap_engine.is_ready():
             self._load_statics(movers)
 
-        translation = QPointF(
-            round(raw_translation.x()), round(raw_translation.y())
-        )
+        translation = QPointF(round(raw_translation.x()), round(raw_translation.y()))
 
         box = self._raw_moving_rect(movers, translation)
         dx, dy, guides = self._snap_engine.find_snap(
@@ -485,13 +504,9 @@ class EditorScene(QGraphicsScene):
         pool = self._guide_pool_items(len(guides))
         for line_item, (horizontal, coord, style) in zip(pool, guides):
             if horizontal:
-                line_item.setLine(
-                    coord, scene_rect.top(), coord, scene_rect.bottom()
-                )
+                line_item.setLine(coord, scene_rect.top(), coord, scene_rect.bottom())
             else:
-                line_item.setLine(
-                    scene_rect.left(), coord, scene_rect.right(), coord
-                )
+                line_item.setLine(scene_rect.left(), coord, scene_rect.right(), coord)
             line_item.setPen(self._guide_pen(style))
             line_item.show()
 
@@ -962,7 +977,9 @@ class AdvancedEditorDialog(QDialog):
         align_row = QHBoxLayout()
         align_row.setSpacing(4)
         for text, mode in (
-            ("Left", "left"), ("Center", "center"), ("Right", "right"),
+            ("Left", "left"),
+            ("Center", "center"),
+            ("Right", "right"),
         ):
             btn = QPushButton(text)
             btn.setToolTip(f"Align selected characters to the {mode} of the selection.")
@@ -973,7 +990,9 @@ class AdvancedEditorDialog(QDialog):
         align_row2 = QHBoxLayout()
         align_row2.setSpacing(4)
         for text, mode in (
-            ("Top", "top"), ("Middle", "middle"), ("Bottom", "bottom"),
+            ("Top", "top"),
+            ("Middle", "middle"),
+            ("Bottom", "bottom"),
         ):
             btn = QPushButton(text)
             btn.setToolTip(f"Align selected characters to the {mode} of the selection.")
@@ -1294,9 +1313,7 @@ class AdvancedEditorDialog(QDialog):
 
     def _snap_rotation_value(self, value, shift_held=None):
         if shift_held is None:
-            shift_held = bool(
-                QApplication.queryKeyboardModifiers() & Qt.ShiftModifier
-            )
+            shift_held = bool(QApplication.queryKeyboardModifiers() & Qt.ShiftModifier)
         if not shift_held:
             return value
         snapped = round(value / ROTATE_SNAP_STEP) * ROTATE_SNAP_STEP
@@ -1351,8 +1368,12 @@ class AdvancedEditorDialog(QDialog):
             return
         before = self._snapshot_selected()
         rects = {item: self.scene._item_scene_rect(item) for item in items}
-        ordered = sorted(items, key=lambda it: rects[it].center().x() if axis == "x"
-                         else rects[it].center().y())
+        ordered = sorted(
+            items,
+            key=lambda it: (
+                rects[it].center().x() if axis == "x" else rects[it].center().y()
+            ),
+        )
         first = rects[ordered[0]].center()
         last = rects[ordered[-1]].center()
         span = (last.x() - first.x()) if axis == "x" else (last.y() - first.y())
@@ -1567,14 +1588,16 @@ class AdvancedEditorDialog(QDialog):
         self.snap_grid = value
         self.scene.snap_size = value
         if value > 0:
-            self.scene.invalidate(self.scene.sceneRect(),
-                                  QGraphicsScene.SceneLayer.BackgroundLayer)
+            self.scene.invalidate(
+                self.scene.sceneRect(), QGraphicsScene.SceneLayer.BackgroundLayer
+            )
 
     def _on_snapping_toggled(self, checked):
         self.scene.snapping_enabled = checked
         self.snap_spin.setEnabled(checked)
-        self.scene.invalidate(self.scene.sceneRect(),
-                              QGraphicsScene.SceneLayer.BackgroundLayer)
+        self.scene.invalidate(
+            self.scene.sceneRect(), QGraphicsScene.SceneLayer.BackgroundLayer
+        )
 
     def export_image(self):
         try:
