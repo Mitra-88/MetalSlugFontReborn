@@ -414,15 +414,20 @@ class EditorScene(QGraphicsScene):
 
     def mouseMoveEvent(self, event):
         super().mouseMoveEvent(event)
-        raw_translation = None
-        if event.buttons() & Qt.LeftButton:
-            # Absolute offset of the mouse from the grab point — the raw,
-            # unsnapped drag path. Snapping must be a pure function of
-            # this, never applied on top of its own previous corrections,
-            # or the item drifts off the cursor and keeps re-correcting.
-            raw_translation = (
-                event.scenePos() - event.buttonDownScenePos(Qt.LeftButton)
-            )
+        if not (event.buttons() & Qt.LeftButton):
+            # Hover move (CharItem hover events enable viewport mouse
+            # tracking, so these arrive with no button pressed). Snapping
+            # must never run here, or placed characters get yanked to
+            # nearby targets every time the mouse moves over the canvas.
+            self._hide_guides()
+            return
+        # Absolute offset of the mouse from the grab point — the raw,
+        # unsnapped drag path. Snapping must be a pure function of
+        # this, never applied on top of its own previous corrections,
+        # or the item drifts off the cursor and keeps re-correcting.
+        raw_translation = (
+            event.scenePos() - event.buttonDownScenePos(Qt.LeftButton)
+        )
         self._apply_object_snap(event.modifiers(), raw_translation)
 
     def mouseReleaseEvent(self, event):
@@ -486,6 +491,11 @@ class EditorScene(QGraphicsScene):
         return rect
 
     def _apply_object_snap(self, modifiers=None, raw_translation=None):
+        if raw_translation is None:
+            # No active drag (hover move or programmatic call): snapping
+            # must never touch already-placed characters.
+            self._hide_guides()
+            return
         if (
             not self.snapping_enabled
             or (modifiers is not None and modifiers & SNAP_DISABLED_MODIFIER)
@@ -499,11 +509,6 @@ class EditorScene(QGraphicsScene):
         if not self._snap_engine.is_ready():
             self._load_statics(movers)
 
-        if raw_translation is None:
-            # Fallback for programmatic use: derive the offset from the
-            # first mover's current displacement.
-            first, first_start = movers[0]
-            raw_translation = first.pos() - first_start
         translation = QPointF(
             round(raw_translation.x()), round(raw_translation.y())
         )
