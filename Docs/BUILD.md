@@ -58,7 +58,7 @@ py -m venv .venv
 pip install -r requirements.txt
 ```
 ```sh
-pyinstaller --noconfirm --onedir --windowed --icon "Assets/Icons/Raubtier.ico" --name "MetalSlugFontReborn" --clean --optimize "2" --version-file "versionfile.txt" --add-data "Src/image_generation.py;." --add-data "Src/qt_utils.py;." --add-data "Src/special_characters.py;." --add-data "Src/themes.py;." --add-data "Src/utils.py;." --add-data "Src/editor.py;." --add-data "Assets;Assets/"  "Src/qt-version.py"
+pyinstaller --noconfirm --onedir --windowed --icon "Assets/Icons/Raubtier.ico" --name "MetalSlugFontReborn" --clean --optimize "2" --version-file "versionfile.txt" --add-data "Src/image_generation.py;." --add-data "Src/ui_common.py;." --add-data "Src/special_characters.py;." --add-data "Src/themes.py;." --add-data "Src/system_info.py;." --add-data "Src/editor.py;." --add-data "Assets;Assets/"  "Src/main.py"
 Move-Item -Path "dist\MetalSlugFontReborn\_internal\Assets" -Destination "dist\MetalSlugFontReborn"
 ```
 
@@ -90,6 +90,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 ```sh
-pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/image_generation.py:." --add-data "Src/qt_utils.py:." --add-data "Src/special_characters.py:." --add-data "Src/themes.py:." --add-data "Src/utils.py:." --add-data "Src/editor.py:." --add-data "Assets:Assets/"  "Src/qt-version.py"
+pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/image_generation.py:." --add-data "Src/ui_common.py:." --add-data "Src/special_characters.py:." --add-data "Src/themes.py:." --add-data "Src/system_info.py:." --add-data "Src/editor.py:." --add-data "Assets:Assets/"  "Src/main.py"
 mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
 ```

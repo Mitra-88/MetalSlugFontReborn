@@ -44,7 +44,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/image_generation.py:." --add-data "Src/qt_utils.py:." --add-data "Src/special_characters.py:." --add-data "Src/themes.py:." --add-data "Src/utils.py:." --add-data "Src/editor.py:." --add-data "Assets:Assets/"  "Src/qt-version.py"
+          pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/image_generation.py:." --add-data "Src/ui_common.py:." --add-data "Src/special_characters.py:." --add-data "Src/themes.py:." --add-data "Src/system_info.py:." --add-data "Src/editor.py:." --add-data "Assets:Assets/"  "Src/main.py"
 
       - name: Move Assets
         run: |

@@ -4,25 +4,68 @@ from os import environ
 from pathlib import Path
 from string import ascii_letters, ascii_uppercase, digits
 from time import time
+from typing import ClassVar
 
 from PIL import Image as PILImage
-from PySide6.QtCore import (QEasingCurve, QObject, QPropertyAnimation, Qt,
-                            QThread, QTimer, QUrl, Signal, Slot)
-from PySide6.QtGui import (QColor, QDesktopServices, QFont, QGradient, QIcon,
-                           QLinearGradient, QPainter, QPaintEvent, QPen,
-                           QPixmap, QSyntaxHighlighter, QTextCharFormat)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
-                               QDialogButtonBox, QFileDialog, QFrame,
-                               QGraphicsOpacityEffect, QGridLayout, QGroupBox,
-                               QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-                               QPlainTextEdit, QPushButton, QScrollArea,
-                               QSlider, QStyle, QVBoxLayout, QWidget)
+from PySide6.QtCore import (
+    QEasingCurve,
+    QObject,
+    QPropertyAnimation,
+    Qt,
+    QThread,
+    QTimer,
+    QUrl,
+    Signal,
+    Slot,
+)
+from PySide6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QFont,
+    QGradient,
+    QIcon,
+    QLinearGradient,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QPixmap,
+    QSyntaxHighlighter,
+    QTextCharFormat,
+)
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFrame,
+    QGraphicsOpacityEffect,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QStyle,
+    QVBoxLayout,
+    QWidget,
+)
 
 from editor import AdvancedEditorDialog
 from image_generation import generate_filename, generate_image, get_font_paths
-from qt_utils import (ViewSupportedButton, about_section, load_config,
-                      save_config, set_theme)
-from utils import readable_size
+from system_info import readable_size
+from ui_common import (
+    ViewSupportedButton,
+    about_section,
+    load_config,
+    save_config,
+    set_theme,
+)
 
 DEFAULT_COMPRESS_LEVEL = 6
 PREVIEW_COMPRESS_LEVEL = 0
@@ -273,14 +316,14 @@ class ImageWorker(QObject):
                 "Computers have a hard cap on how wide or tall an image can be.\n\n"
                 "To fix this, try shortening your text."
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.failed.emit(str(e))
 
 
 class MainWindow(QMainWindow):
     trigger_generation = Signal(dict)
 
-    _color_icons: dict[str, QIcon] = {}
+    _color_icons: ClassVar[dict[str, QIcon]] = {}
 
     def __init__(self):
         super().__init__()
@@ -733,7 +776,7 @@ class MainWindow(QMainWindow):
         zoom_factor = self._get_preview_zoom_factor()
         if not self._preview_user_zoomed:
             zoom_factor = self._fit_zoom_factor(out_w, out_h)
-            pct = max(1, int(round(zoom_factor * 100)))
+            pct = max(1, round(zoom_factor * 100))
             self.zoom_slider.blockSignals(True)
             self.zoom_slider.setValue(max(ZOOM_MIN, min(ZOOM_MAX, pct)))
             self.zoom_slider.blockSignals(False)
@@ -800,8 +843,8 @@ class MainWindow(QMainWindow):
         except FileNotFoundError as e:
             self._set_preview_error(f"{e}\n\nPlease remove it to see the preview.")
             self.supported_btn.reveal()
-        except Exception as e:
-            self._set_preview_error(f"Preview unavailable.\n\nError: {str(e)}")
+        except Exception as e:  # noqa: BLE001
+            self._set_preview_error(f"Preview unavailable.\n\nError: {e!s}")
             self.supported_btn.reveal()
 
     def update_character_count(self):
@@ -815,7 +858,7 @@ class MainWindow(QMainWindow):
         bad = sum(1 for ch in text if ch not in valid)
         if bad:
             self.unsupported_hint.setText(
-                f"{bad} unsupported character(s) — highlighted red, skipped in the output"
+                f"{bad} unsupported character(s), highlighted red, skipped in the output"
             )
             self.unsupported_hint.setVisible(True)
         else:
@@ -1022,7 +1065,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Missing Asset", str(e))
             self.supported_btn.reveal()
             return
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             QMessageBox.critical(
                 self, "Editor Error", f"The editor could not be opened:\n{e}"
             )
@@ -1049,11 +1092,11 @@ class MainWindow(QMainWindow):
             size = readable_size(path.stat().st_size)
             message = (
                 "Successfully generated image!\n\n"
-                "Image saved at: {}\n"
-                "Dimensions: {} x {} pixels\n"
-                "File size: {}\n"
-                "Time taken: {:.3f} seconds"
-            ).format(path, width, height, size, time() - start_time)
+                f"Image saved at: {path}\n"
+                f"Dimensions: {width} x {height} pixels\n"
+                f"File size: {size}\n"
+                f"Time taken: {time() - start_time:.3f} seconds"
+            )
 
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("Success")
@@ -1085,7 +1128,7 @@ class MainWindow(QMainWindow):
 
         except OSError as e:
             QMessageBox.critical(
-                self, "Error", f"Failed to read generated image metadata:\n{str(e)}"
+                self, "Error", f"Failed to read generated image metadata:\n{e!s}"
             )
 
     @Slot(str)
@@ -1102,9 +1145,7 @@ if __name__ == "__main__":
     release = platform.release()
     if os_name == "Windows" and release == "11":
         app.setStyle("FluentWinUI3")
-    elif os_name == "Windows" and release == "10":
-        app.setStyle("Fusion")
-    elif os_name == "Linux":
+    elif os_name == "Windows" and release == "10" or os_name == "Linux":
         app.setStyle("Fusion")
     elif os_name == "Darwin":
         app.setStyle("macOS")

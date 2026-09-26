@@ -6,19 +6,42 @@ from time import time
 from PIL import Image, ImageQt
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QPen, QPixmap, QShortcut
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
-                               QFormLayout, QFrame, QGraphicsItem,
-                               QGraphicsLineItem, QGraphicsPixmapItem,
-                               QGraphicsRectItem, QGraphicsScene,
-                               QGraphicsView, QGroupBox, QHBoxLayout,
-                               QInputDialog, QLabel, QMenu, QMessageBox,
-                               QPushButton, QScrollArea, QSlider, QSpinBox,
-                               QSplitter, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QFrame,
+    QGraphicsItem,
+    QGraphicsLineItem,
+    QGraphicsPixmapItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QSpinBox,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
 
-from image_generation import (create_character_image, generate_filename,
-                              get_font_paths, layout_characters)
-from qt_utils import load_config, save_config
-from utils import readable_size
+from image_generation import (
+    create_character_image,
+    generate_filename,
+    get_font_paths,
+    layout_characters,
+)
+from system_info import readable_size
+from ui_common import load_config, save_config
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -70,7 +93,7 @@ class GuideStyle(IntEnum):
 
 
 class _SnapCandidate:
-    __slots__ = ("delta", "coord", "guides")
+    __slots__ = ("coord", "delta", "guides")
 
     def __init__(self, delta, coord, guides):
         self.delta = delta
@@ -1161,8 +1184,8 @@ class AdvancedEditorDialog(QDialog):
     def _on_drag_finished(self):
         if self._drag_before is not None:
             for item, start in self._drag_start_pos.items():
-                delta_x = int(round(item.pos().x() - start.x()))
-                delta_y = int(round(item.pos().y() - start.y()))
+                delta_x = round(item.pos().x() - start.x())
+                delta_y = round(item.pos().y() - start.y())
                 if delta_x or delta_y:
                     item.dx += delta_x
                     item.dy += delta_y
@@ -1204,8 +1227,8 @@ class AdvancedEditorDialog(QDialog):
         try:
             if selected:
                 first = selected[0]
-                self.offset_x_spin.setValue(int(round(first.dx)))
-                self.offset_y_spin.setValue(int(round(first.dy)))
+                self.offset_x_spin.setValue(round(first.dx))
+                self.offset_y_spin.setValue(round(first.dy))
                 self.scale_slider.setValue(first.scale_pct)
                 self.scale_spin.setValue(first.scale_pct)
                 self.rotation_slider.setValue(first.rotation)

@@ -8,14 +8,25 @@ from PyInstaller import __version__ as pyinstaller_version
 from PySide6 import __version__ as pyside6_version
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox,
-                               QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-                               QPlainTextEdit, QPushButton, QTabWidget,
-                               QTextBrowser, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPlainTextEdit,
+    QPushButton,
+    QTabWidget,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
 from special_characters import LICENSE_TEXT
+from system_info import build_date, get_system_info, msfr_version
 from themes import dark_mode, light_mode, tokyo_night
-from utils import build_date, get_system_info, msfr_version
 
 ABOUT_DIALOG_MIN_WIDTH = 450
 ABOUT_LAYOUT_SPACING = 15
