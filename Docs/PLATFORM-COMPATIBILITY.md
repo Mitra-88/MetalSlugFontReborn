@@ -124,10 +124,12 @@ duplicate the same list in a third place.
 | Windows CI build + offscreen smoke run | Tested every release |
 | Linux CI build (ubuntu-22.04) + offscreen smoke run | Tested every release |
 | macOS CI build | Build-tested, launch not verified (no hardware) |
-| Real Wayland sessions (GNOME/KDE/COSMIC) by hand | Not exercised by the maintainer; covered by bundled Wayland plugin + portal design |
+| Real Wayland sessions (GNOME/KDE/COSMIC) by hand | Not exercised by the maintainer; frozen builds default to the xcb backend so the window manager draws title bars and resize borders |
 | Windows on a clean VM without VC++ installed | Not run; CRT DLLs verified present in the bundle |
 
 Known remaining limitations: macOS launch is unverified on real hardware and
 blocked by Gatekeeper until signed; CJK input is unavailable in frozen Linux
-builds (compose IM workaround); no distribution-wide Linux packages (deb/rpm),
-the release artifact is the PyInstaller folder.
+builds (compose IM workaround); frozen Linux builds run through XWayland
+(xcb backend) because GNOME Wayland draws no title bar for Qt apps, which
+makes the xcb system libraries a runtime requirement; no distribution-wide
+Linux packages (deb/rpm), the release artifact is the PyInstaller folder.

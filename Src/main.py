@@ -1500,6 +1500,7 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
         environ.setdefault("QT_IM_MODULE", "compose")
+        environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
     plugin_hint = missing_plugin_message(
         getattr(sys, "frozen", False),

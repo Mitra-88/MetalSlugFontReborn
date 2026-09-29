@@ -75,6 +75,9 @@ You will need the following dependencies on Ubuntu/Debian:
 ```sh
 sudo apt install -y python3 python3-pip python3-venv libxcb-cursor0
 ```
+`libxcb-cursor0` is also required at runtime by the packaged build, which
+uses the xcb backend on Linux so the window manager provides a title bar,
+resizing and a close button.
 On Fedora:
 ```sh
 sudo dnf install -y python3 python3-pip python3-virtualenv xcb-util-cursor
