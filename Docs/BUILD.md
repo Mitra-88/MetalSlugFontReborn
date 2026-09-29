@@ -40,6 +40,7 @@ git pull
 To compile MetalSlugFontReborn you will need the following:
 
 - [Python](https://www.python.org/) 3.12 or later
+- [Rust](https://www.rust-lang.org/tools/install) 1.70 or later, for the native rotation library. Without it the build still works and rotation falls back to a slower pure-Python engine.
 - [PyInstaller](https://pyinstaller.org/en/stable/) 6.22.2 or later
 - [PySide6-Essentials](https://pypi.org/project/PySide6/) 6.11.2 or later
 - [Pillow](https://pillow.readthedocs.io/en/stable/) 12.3.0 or later
@@ -56,10 +57,14 @@ cd MetalSlugFontReborn
 py -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+git rev-parse --short HEAD > Src\build_commit.txt
+cargo build --release --manifest-path rust\rotsprite-rs\Cargo.toml
 ```
 ```sh
-pyinstaller --noconfirm --onedir --windowed --icon "Assets/Icons/Raubtier.ico" --name "MetalSlugFontReborn" --clean --optimize "2" --version-file "versionfile.txt" --add-data "Src/image_generation.py;." --add-data "Src/ui_common.py;." --add-data "Src/special_characters.py;." --add-data "Src/themes.py;." --add-data "Src/system_info.py;." --add-data "Src/editor.py;." --add-data "Assets;Assets/"  "Src/main.py"
+pyinstaller --noconfirm --onedir --windowed --icon "Assets/Icons/Raubtier.ico" --name "MetalSlugFontReborn" --clean --optimize "2" --version-file "versionfile.txt" --add-data "Src/build_commit.txt;." --add-data "LICENSE;." --add-data "Assets;Assets/" --add-binary "rust/rotsprite-rs/target/release/msfr_rotsprite.dll;."  "Src/main.py"
 Move-Item -Path "dist\MetalSlugFontReborn\_internal\Assets" -Destination "dist\MetalSlugFontReborn"
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "dist\MetalSlugFontReborn\_internal\PySide6\translations", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\tls", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\networkinformation", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\generic", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\iconengines", "dist\MetalSlugFontReborn\_internal\setuptools"
+Remove-Item -Force -ErrorAction SilentlyContinue "dist\MetalSlugFontReborn\_internal\PySide6\opengl32sw.dll", "dist\MetalSlugFontReborn\_internal\PySide6\Qt6Network.dll", "dist\MetalSlugFontReborn\_internal\PySide6\Qt6Svg.dll", "dist\MetalSlugFontReborn\_internal\libcrypto-3-x64.dll", "dist\MetalSlugFontReborn\_internal\libssl-3-x64.dll"
 ```
 
 ---
@@ -88,8 +93,34 @@ cd MetalSlugFontReborn
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+git rev-parse --short HEAD > Src/build_commit.txt
+cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
 ```
 ```sh
-pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/image_generation.py:." --add-data "Src/ui_common.py:." --add-data "Src/special_characters.py:." --add-data "Src/themes.py:." --add-data "Src/system_info.py:." --add-data "Src/editor.py:." --add-data "Assets:Assets/"  "Src/main.py"
+pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/build_commit.txt:." --add-data "LICENSE:." --add-data "Assets:Assets/" --add-binary "rust/rotsprite-rs/target/release/libmsfr_rotsprite.so:."  "Src/main.py"
 mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
+rm -rf dist/MetalSlugFontReborn/_internal/PySide6/translations dist/MetalSlugFontReborn/_internal/PySide6/plugins/tls dist/MetalSlugFontReborn/_internal/PySide6/plugins/networkinformation dist/MetalSlugFontReborn/_internal/PySide6/plugins/generic dist/MetalSlugFontReborn/_internal/PySide6/plugins/iconengines dist/MetalSlugFontReborn/_internal/setuptools
+rm -f dist/MetalSlugFontReborn/_internal/PySide6/Qt6Network* dist/MetalSlugFontReborn/_internal/PySide6/Qt6Svg* dist/MetalSlugFontReborn/_internal/libcrypto* dist/MetalSlugFontReborn/_internal/libssl*
 ```
+
+On macOS the rotation library is named `libmsfr_rotsprite.dylib`, so use that file name in the `--add-binary` flag.
+
+### Linux AppImage
+
+On Linux you can wrap the build above into a single AppImage file. `libfuse2` is needed on some distributions to run the packaging tools, and they also work without it through `APPIMAGE_EXTRACT_AND_RUN=1`.
+
+```sh
+wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+chmod +x linuxdeploy-x86_64.AppImage
+mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/128x128/apps
+cp -r dist/MetalSlugFontReborn AppDir/usr/bin/MetalSlugFontReborn
+cp Deploy/linux/AppRun AppDir/AppRun
+cp Deploy/linux/MetalSlugFontReborn.desktop AppDir/
+cp Assets/Icons/Raubtier.png AppDir/MetalSlugFontReborn.png
+cp Assets/Icons/Raubtier.png AppDir/usr/share/icons/hicolor/128x128/apps/MetalSlugFontReborn.png
+chmod +x AppDir/AppRun AppDir/usr/bin/MetalSlugFontReborn/MetalSlugFontReborn
+APPIMAGE_EXTRACT_AND_RUN=1 ./linuxdeploy-x86_64.AppImage --appdir AppDir -d AppDir/MetalSlugFontReborn.desktop --output appimage
+chmod +x MetalSlugFontReborn*.AppImage
+```
+
+The resulting `MetalSlugFontReborn*.AppImage` is self-contained and runs on any distribution new enough for its bundled libraries.

@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from platform import python_version
@@ -6,16 +7,18 @@ import tomlkit
 from PIL import __version__ as pillow_version
 from PyInstaller import __version__ as pyinstaller_version
 from PySide6 import __version__ as pyside6_version
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTabWidget,
@@ -23,8 +26,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from tomlkit.exceptions import TOMLKitError
 
-from special_characters import LICENSE_TEXT
+from image_generation import get_font_charset, get_font_colors, get_font_ids
 from system_info import build_date, get_system_info, msfr_version
 from themes import dark_mode, light_mode, tokyo_night
 
@@ -60,11 +64,12 @@ class Config:
     def _load(self):
         if not self._path.exists():
             return
-        if self._path.stat().st_size > MAX_FILE_SIZE_BYTES:
-            raise ValueError(
-                f"Config file exceeds safety limit ({self._path.stat().st_size} bytes)."
-            )
-        self._doc = tomlkit.loads(self._path.read_text(encoding="utf-8"))
+        try:
+            if self._path.stat().st_size > MAX_FILE_SIZE_BYTES:
+                return
+            self._doc = tomlkit.loads(self._path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError, TOMLKitError):
+            pass
 
     def get(self, key: str, fallback=None):
         return self._doc.get(key, fallback)
@@ -74,7 +79,15 @@ class Config:
         self._save()
 
     def _save(self):
-        self._path.write_text(tomlkit.dumps(self._doc), encoding="utf-8")
+        tmp = self._path.with_name(self._path.name + ".part")
+        try:
+            tmp.write_text(tomlkit.dumps(self._doc), encoding="utf-8")
+            os.replace(tmp, self._path)
+        except OSError:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 config = Config()
@@ -88,13 +101,69 @@ def save_config(key, value):
     config.set(key, value)
 
 
+def resolve_auto_theme(scheme=None):
+    if scheme is None:
+        scheme = QApplication.styleHints().colorScheme()
+    return "Dark" if scheme == Qt.ColorScheme.Dark else "Light"
+
+
 def set_theme(theme_name=None):
-    theme_name = theme_name or load_config("theme")
+    if theme_name is None:
+        theme_name = load_config("theme")
+        if not isinstance(theme_name, str) or theme_name not in theme_list:
+            theme_name = resolve_auto_theme()
+        QApplication.setPalette(theme_list[theme_name]())
+        return
     if theme_name not in theme_list:
         return
-    palette = theme_list[theme_name]()
-    QApplication.setPalette(palette)
+    QApplication.setPalette(theme_list[theme_name]())
     save_config("theme", theme_name)
+
+
+def theme_setup_needed(scheme=None):
+    if scheme is None:
+        scheme = QApplication.styleHints().colorScheme()
+    if scheme != Qt.ColorScheme.Unknown:
+        return False
+    saved = load_config("theme")
+    if isinstance(saved, str) and saved in theme_list:
+        return False
+    skip = load_config("skip_theme_prompt", fallback=False)
+    return not (isinstance(skip, bool) and skip)
+
+
+def build_theme_setup_dialog(parent=None):
+    dialog = QMessageBox(parent)
+    dialog.setWindowTitle("Choose a Theme")
+    dialog.setText(
+        "The system theme could not be detected.\nPick the theme you want to use:"
+    )
+    theme_buttons = {
+        name: dialog.addButton(name, QMessageBox.AcceptRole) for name in theme_list
+    }
+    dialog.addButton(QMessageBox.Close)
+    dont_ask = QCheckBox("Don't ask again")
+    dialog.setCheckBox(dont_ask)
+    return dialog, theme_buttons, dont_ask
+
+
+def apply_theme_choice(dialog, theme_buttons, dont_ask_checked):
+    clicked = dialog.clickedButton()
+    for name, button in theme_buttons.items():
+        if button is clicked:
+            set_theme(name)
+            if dont_ask_checked:
+                save_config("skip_theme_prompt", True)
+            return name
+    if dont_ask_checked:
+        save_config("skip_theme_prompt", True)
+    return None
+
+
+def show_theme_setup_dialog(parent=None):
+    dialog, theme_buttons, dont_ask = build_theme_setup_dialog(parent)
+    dialog.exec()
+    return apply_theme_choice(dialog, theme_buttons, dont_ask.isChecked())
 
 
 def create_group(title, content):
@@ -103,7 +172,27 @@ def create_group(title, content):
     return group
 
 
-def about_section(parent):
+GITHUB_URL = "https://github.com/Mitra-88/MetalSlugFontReborn"
+ISSUES_URL = GITHUB_URL + "/issues"
+
+
+def build_info_rows():
+    return [
+        ("Operating System:", get_system_info()),
+        ("Version:", msfr_version),
+        ("Build date:", build_date),
+        ("Python:", python_version()),
+        ("Qt (PySide6):", pyside6_version),
+        ("Pillow:", pillow_version),
+        ("PyInstaller:", pyinstaller_version),
+    ]
+
+
+def system_diagnostics():
+    return "\n".join(f"{label} {value}" for label, value in build_info_rows())
+
+
+def build_about_dialog(parent=None):
     dialog = QDialog(parent)
     dialog.setWindowTitle("About MetalSlugFontReborn")
     dialog.setMinimumWidth(ABOUT_DIALOG_MIN_WIDTH)
@@ -118,7 +207,7 @@ def about_section(parent):
     header = QHBoxLayout()
 
     icon = QLabel()
-    pixmap = QPixmap("Assets/Icons/Raubtier.png")
+    pixmap = QPixmap(str(PROJECT_ROOT / "Assets" / "Icons" / "Raubtier.png"))
     if not pixmap.isNull():
         icon.setPixmap(
             pixmap.scaled(
@@ -128,65 +217,71 @@ def about_section(parent):
                 Qt.SmoothTransformation,
             )
         )
+    header.addWidget(icon, alignment=Qt.AlignTop)
 
     info = QVBoxLayout()
     info.setSpacing(INFO_LAYOUT_SPACING)
 
     app_name = QLabel("MetalSlugFontReborn")
-    font = app_name.font()
-    font.setPointSize(APP_NAME_FONT_SIZE)
-    font.setBold(True)
-    app_name.setFont(font)
+    name_font = app_name.font()
+    name_font.setPointSize(APP_NAME_FONT_SIZE)
+    name_font.setBold(True)
+    app_name.setFont(name_font)
+
+    version_label = QLabel(msfr_version)
+    version_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
     license_label = QLabel("GPL-3.0 Licensed")
 
-    github = QLabel(
-        '<a href="https://github.com/Mitra-88/MetalSlugFontReborn">GitHub Repository</a>'
+    links = QLabel(
+        f'<a href="{GITHUB_URL}">GitHub Repository</a><br>'
+        f'<a href="{ISSUES_URL}">Report an Issue</a>'
     )
-    github.setOpenExternalLinks(True)
+    links.setOpenExternalLinks(True)
 
     info.addWidget(app_name)
+    info.addWidget(version_label)
     info.addWidget(license_label)
-    info.addWidget(github)
-
-    header.addWidget(icon, alignment=Qt.AlignTop)
+    info.addWidget(links)
     header.addLayout(info)
     header.addStretch()
 
     about_layout.addLayout(header)
 
-    os_layout = QVBoxLayout()
-    os_label = QLabel(f"OS: {get_system_info()}")
-    os_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    os_label.setWordWrap(True)
-    os_layout.addWidget(os_label)
-
-    about_layout.addWidget(create_group("Operating System:", os_layout))
-    build_info = QGridLayout()
-    build_info.setVerticalSpacing(BUILD_INFO_V_SPACING)
-
-    build_items = [
-        ("Version:", msfr_version),
-        ("Python:", python_version()),
-        ("PyInstaller:", pyinstaller_version),
-        ("PySide6:", pyside6_version),
-        ("Pillow:", pillow_version),
-        ("Build date:", build_date),
-    ]
-
-    for row, (label_text, value) in enumerate(build_items):
+    system_grid = QGridLayout()
+    system_grid.setVerticalSpacing(BUILD_INFO_V_SPACING)
+    for row, (label_text, value) in enumerate(build_info_rows()):
         lbl = QLabel(f"<b>{label_text}</b>")
         val = QLabel(str(value))
-
+        val.setTextFormat(Qt.PlainText)
         lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         val.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        val.setWordWrap(True)
+        system_grid.addWidget(lbl, row, 0, Qt.AlignTop)
+        system_grid.addWidget(val, row, 1, Qt.AlignTop)
+    system_grid.setColumnStretch(1, 1)
 
-        build_info.addWidget(lbl, row, 0)
-        build_info.addWidget(val, row, 1)
+    system_layout = QVBoxLayout()
+    system_layout.addLayout(system_grid)
+    copy_row = QHBoxLayout()
+    copy_row.addStretch()
 
-    build_group = create_group("Build Information:", build_info)
-    about_layout.addWidget(build_group)
+    def _copy_diagnostics():
+        text = system_diagnostics()
+        QApplication.clipboard().setText(text)
+        copied = QApplication.clipboard().text() == text
+        copy_button.setText("Copied!" if copied else "Copy failed")
 
+    copy_button = QPushButton("Copy for Bug Report")
+    copy_button.setObjectName("copy_diagnostics_button")
+    copy_button.setToolTip(
+        "Copy the system and version details to the clipboard for bug reports"
+    )
+    copy_button.clicked.connect(_copy_diagnostics)
+    copy_row.addWidget(copy_button)
+    system_layout.addLayout(copy_row)
+
+    about_layout.addWidget(create_group("System Information:", system_layout))
     about_layout.addStretch()
     tab_widget.addTab(about_tab, "About")
 
@@ -194,9 +289,10 @@ def about_section(parent):
     license_layout = QVBoxLayout(license_tab)
 
     license_text_edit = QPlainTextEdit()
-    license_text_edit.setPlainText(LICENSE_TEXT)
+    license_text_edit.setPlainText(load_license_text())
     license_text_edit.setReadOnly(True)
     license_text_edit.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+    license_text_edit.setStyleSheet("font-family: Consolas, 'Courier New', monospace;")
 
     license_layout.addWidget(license_text_edit)
     tab_widget.addTab(license_tab, "License")
@@ -210,53 +306,71 @@ def about_section(parent):
     main_layout.addWidget(button_box, alignment=Qt.AlignRight)
 
     dialog.setLayout(main_layout)
-    dialog.exec()
+    return dialog
 
 
-MARKDOWN_CONTENT = """\
-# MetalSlugFontReborn Character Support
+def about_section(parent=None):
+    build_about_dialog(parent).exec()
 
-Here you can find which characters MetalSlugFontReborn supports.
 
-## Font 1 Support
+LICENSE_FALLBACK = (
+    "MetalSlugFontReborn is distributed under the "
+    "GNU General Public License v3.0. The full license text was not "
+    "found in this installation."
+)
 
-- **Letters:** Lowercase and Uppercase
-- **Numbers:** 0 to 9
-- **Symbols:** , * {} () ^ : $ = ! > - ∞ < # % . + & ? " ; / ~ _ | ¥ ⛶ © ♥ ▲ ▼ ◀ ▶ ⋆ ★ ☞ ✖
-- **Colors:** Blue, Orange and Gold
 
-## Font 2 Support
+def load_license_text():
+    if getattr(sys, "frozen", False):
+        candidates = [Path(getattr(sys, "_MEIPASS", ".")) / "LICENSE"]
+    else:
+        candidates = [PROJECT_ROOT / "LICENSE"]
+    for candidate in candidates:
+        try:
+            return candidate.read_text(encoding="utf-8")
+        except OSError:
+            continue
+    return LICENSE_FALLBACK
 
-- **Letters:** Lowercase and Uppercase
-- **Numbers:** 0 to 9
-- **Symbols:** , = ︷ ! - . + & ? / ♪ ✖
-- **Colors:** Blue, Orange and Gold
 
-## Font 3 Support
+def describe_letter_case(chars):
+    lower = any(ch.islower() for ch in chars)
+    upper = any(ch.isupper() for ch in chars)
+    if lower and upper:
+        return "Lowercase and Uppercase"
+    if upper:
+        return "Uppercase"
+    return "Lowercase"
 
-- **Letters:** Lowercase and Uppercase
-- **Numbers:** 0 to 9
-- **Symbols:** ' {} () : , = ! > - < . + ? " ; / _ | ¥ ⛶ © ♥ ▲ ▼ ◀ ▶ ✖
-- **Colors:** Blue and Orange
 
-## Font 4 Support
+def describe_numbers(chars):
+    digits = sorted(ch for ch in chars if ch.isdigit())
+    if digits == list("0123456789"):
+        return "0 to 9"
+    return " ".join(digits) if digits else "None"
 
-- **Letters:** Lowercase and Uppercase
-- **Numbers:** 0 to 9
-- **Symbols:** ' * {} () ^ : $ = ! > - < # % . + & ? " ; / ~ _ ¥ ⛶ © ♥ ▲ ▼ ◀ ▶ | ✖
-- **Colors:** Blue, Orange and Yellow
 
-## Font 5 Support
-
-- **Letters:** Uppercase
-- **Numbers:** 1 to 9
-- **Symbols:** ! ?
-- **Colors:** Orange
-
-# Unsupported Characters (Unused)
-
-- **Symbols:** ȧ ä ā á à â ã í ü ū ú ė ë é ê ö ō ó ô Ⅰ Ⅱ Ⅲ Ⅳ Ⅴ
-"""
+def build_supported_characters_markdown():
+    lines = [
+        "# MetalSlugFontReborn Character Support",
+        "",
+        "Here you can find which characters MetalSlugFontReborn supports.",
+    ]
+    for font in get_font_ids():
+        chars = get_font_charset(font)
+        symbols = "".join(
+            sorted(ch for ch in chars if not ch.isalnum() and ch not in " \n")
+        )
+        lines += [
+            "",
+            f"## Font {font} Support",
+            "",
+            f"- **Letters:** {describe_letter_case(chars)}",
+            f"- **Numbers:** {describe_numbers(chars)}",
+            f"- **Symbols:** {symbols or 'None'}",
+            f"- **Colors:** {', '.join(get_font_colors(font))}",
+        ]
+    return "\n".join(lines)
 
 
 class SupportedCharactersDialog(QDialog):
@@ -287,7 +401,7 @@ class SupportedCharactersDialog(QDialog):
 
         browser = QTextBrowser()
         browser.setOpenExternalLinks(False)
-        browser.setMarkdown(MARKDOWN_CONTENT)
+        browser.setMarkdown(build_supported_characters_markdown())
         root.addWidget(browser, 1)
 
         row = QHBoxLayout()
@@ -306,20 +420,17 @@ def open_supported_characters(parent=None):
 
 
 class ViewSupportedButton(QPushButton):
-    clicked_open = Signal()
-
     def __init__(self, parent=None):
         super().__init__("View Supported Characters", parent)
         self.setCursor(Qt.PointingHandCursor)
         self.clicked.connect(self._on_click)
 
     def reveal(self):
-        self.setText("Unsupported character! Click here to view supported")
+        self.setText("Some sprites are missing - view supported characters")
 
     def reset_to_normal(self):
         self.setText("View Supported Characters")
 
     def _on_click(self):
         self.reset_to_normal()
-        self.clicked_open.emit()
         open_supported_characters(self.window())

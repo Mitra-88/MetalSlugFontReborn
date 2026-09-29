@@ -170,3 +170,9 @@ poetry.toml
 pyrightconfig.json
 
 config.toml
+
+# generated at build time
+Src/build_commit.txt
+
+# ZCode
+.zcode/

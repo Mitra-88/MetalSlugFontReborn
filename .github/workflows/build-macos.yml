@@ -11,6 +11,7 @@ on:
       - '.github/workflows/**'
       - 'Assets/**'
       - 'Src/**'
+      - 'rust/**'
       - 'versionfile.txt'
 
 jobs:
@@ -42,9 +43,21 @@ jobs:
       - name: Install dependencies
         run: pip install --upgrade PySide6-Essentials pyinstaller pillow tomlkit
 
+      - name: Write build commit
+        run: git rev-parse --short HEAD > Src/build_commit.txt
+
+      - name: Build rotation library
+        run: cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
+
       - name: Build with PyInstaller
         run: |
-          pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/image_generation.py:." --add-data "Src/ui_common.py:." --add-data "Src/special_characters.py:." --add-data "Src/themes.py:." --add-data "Src/system_info.py:." --add-data "Src/editor.py:." --add-data "Assets:Assets/"  "Src/main.py"
+          pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/build_commit.txt:." --add-data "LICENSE:." --add-data "Assets:Assets/" --add-binary "rust/rotsprite-rs/target/release/libmsfr_rotsprite.dylib:."  "Src/main.py"
+
+      - name: Trim unused Qt components
+        run: |
+          cd dist/MetalSlugFontReborn/_internal
+          rm -rf PySide6/translations PySide6/plugins/tls PySide6/plugins/networkinformation PySide6/plugins/generic PySide6/plugins/iconengines setuptools
+          rm -f PySide6/opengl32sw.dll PySide6/Qt6Network* PySide6/Qt6Svg* PySide6/libQt6Network* PySide6/libQt6Svg* libcrypto* libssl*
 
       - name: Move Assets
         run: |

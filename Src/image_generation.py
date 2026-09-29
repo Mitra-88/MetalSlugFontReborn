@@ -1,3 +1,4 @@
+from os import replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -23,6 +24,71 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FONTS_BASE_DIR = PROJECT_ROOT / "Assets" / "Fonts"
 
 _CHAR_IMAGE_CACHE = {}
+_CHARSET_CACHE = {}
+_INVERSE_SYMBOLS = {name: char for char, name in special_characters.items()}
+
+
+def get_font_ids():
+    base = FONTS_BASE_DIR
+    if not base.is_dir():
+        return []
+    return sorted(
+        int(d.name.split("-")[1])
+        for d in base.iterdir()
+        if d.is_dir() and d.name.startswith("Font-") and d.name[5:].isdigit()
+    )
+
+
+def get_font_colors(font):
+    base = FONTS_BASE_DIR / f"Font-{font}"
+    if not base.is_dir():
+        return []
+    return sorted(
+        d.name[3:] for d in base.iterdir() if d.is_dir() and d.name.startswith("MS-")
+    )
+
+
+def get_font_charset(font):
+    key = int(font)
+    cached = _CHARSET_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    base = FONTS_BASE_DIR / f"Font-{key}"
+    chars = {" ", "\n"}
+
+    def add_from(directory, mapper):
+        if not directory.is_dir():
+            return
+        for entry in directory.iterdir():
+            char = mapper(entry.stem)
+            if char is not None:
+                chars.add(char)
+
+    for color in get_font_colors(key):
+        color_dir = base / f"MS-{color}"
+        add_from(
+            color_dir / "Letters" / "Lower-Case",
+            lambda stem: stem if len(stem) == 1 and stem.islower() else None,
+        )
+        add_from(
+            color_dir / "Letters" / "Upper-Case",
+            lambda stem: stem if len(stem) == 1 and stem.isupper() else None,
+        )
+        add_from(
+            color_dir / "Numbers",
+            lambda stem: stem if len(stem) == 1 and stem.isdigit() else None,
+        )
+        add_from(color_dir / "Symbols", _INVERSE_SYMBOLS.get)
+
+    frozen = frozenset(chars)
+    _CHARSET_CACHE[key] = frozen
+    return frozen
+
+
+def find_unsupported_characters(text, font):
+    charset = get_font_charset(font)
+    return sorted({ch for ch in text if ch not in charset})
 
 
 def generate_filename(_=None):
@@ -52,14 +118,13 @@ def get_character_path(character, font_paths):
         path = font_paths["symbols"] / f"{special_characters[character]}.png"
     else:
         raise FileNotFoundError(
-            f"Character '{character}' is not supported. "
-            "Click on the view supported characters button for the list of allowed characters"
+            f"Character '{character}' is not available in the selected font."
         )
 
     if not path.is_file():
         raise FileNotFoundError(
-            f"Character '{character}' is supported but its asset file is missing: {path}\n"
-            "Check the font sprite directories."
+            f"Character '{character}' has no sprite asset ({path}) "
+            "and is not supported by this font."
         )
 
     return path
@@ -79,6 +144,7 @@ def create_character_image(character, font_paths):
         return cached
 
     image = Image.open(path)
+    image.load()
     _CHAR_IMAGE_CACHE[path] = image
     return image
 
@@ -110,7 +176,7 @@ def layout_characters(
         if sprites:
             line_width += letter_spacing * (len(sprites) - 1)
         line_height = max((img.height for img in sprites), default=0)
-        if not line:
+        if not line.strip():
             line_height = EMPTY_LINE_HEIGHT
         line_layouts.append((line, sprites, line_width, line_height))
         max_width = max(max_width, line_width)
@@ -146,7 +212,7 @@ def layout_characters(
 
 
 def split_into_lines(text):
-    return text.split("\n")
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
 
 def generate_image(
@@ -158,47 +224,10 @@ def generate_image(
     return_image=False,
     scale=1,
 ):
-    lines = split_into_lines(text)
-    all_chars = {c for line in lines for c in line}
-    char_images = {char: create_character_image(char, font_paths) for char in all_chars}
-
-    line_images = []
-    max_width = total_height = 0
-
-    for i, line in enumerate(lines):
-        if not line:
-            line_height = EMPTY_LINE_HEIGHT
-            line_img = Image.new(IMAGE_MODE, (1, line_height), TRANSPARENT_COLOR)
-            line_images.append(line_img)
-            total_height += line_height
-            if i < len(lines) - 1:
-                total_height += LINE_SPACING
-            continue
-
-        line_width = sum(char_images[c].width for c in line)
-        line_height = max(char_images[c].height for c in line)
-        line_img = Image.new(IMAGE_MODE, (line_width, line_height), TRANSPARENT_COLOR)
-
-        x = 0
-        for char in line:
-            img = char_images[char]
-            line_img.paste(img, (x, line_height - img.height), img)
-            x += img.width
-
-        line_images.append(line_img)
-        max_width = max(max_width, line_width)
-        total_height += line_height
-
-        if i < len(lines) - 1:
-            total_height += LINE_SPACING
-
-    final_image = Image.new(IMAGE_MODE, (max_width, total_height), TRANSPARENT_COLOR)
-    y = 0
-    for i, img in enumerate(line_images):
-        final_image.paste(img, (0, y), img)
-        y += img.height
-        if i < len(line_images) - 1:
-            y += LINE_SPACING
+    placements, (width, height) = layout_characters(text, font_paths)
+    final_image = Image.new(IMAGE_MODE, (width, height), TRANSPARENT_COLOR)
+    for _char, img, x, y in placements:
+        final_image.paste(img, (x, y), img)
 
     if scale > 1:
         final_image = final_image.resize(
@@ -212,5 +241,10 @@ def generate_image(
         return final_image, width, height
 
     save_path = Path(save_dir) / filename
-    final_image.save(save_path, compress_level=compress_level)
+    tmp_path = save_path.with_name(f"{save_path.stem}.part{IMAGE_EXTENSION}")
+    try:
+        final_image.save(tmp_path, compress_level=compress_level)
+        replace(tmp_path, save_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
     return str(save_path), width, height

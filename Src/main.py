@@ -2,15 +2,18 @@ import platform
 import sys
 from os import environ
 from pathlib import Path
-from string import ascii_letters, ascii_uppercase, digits
 from time import time
 from typing import ClassVar
 
 from PIL import Image as PILImage
+from PIL import ImageQt
 from PySide6.QtCore import (
     QEasingCurve,
     QObject,
     QPropertyAnimation,
+    QRectF,
+    QSize,
+    QStandardPaths,
     Qt,
     QThread,
     QTimer,
@@ -27,6 +30,7 @@ from PySide6.QtGui import (
     QLinearGradient,
     QPainter,
     QPaintEvent,
+    QPalette,
     QPen,
     QPixmap,
     QSyntaxHighlighter,
@@ -52,28 +56,43 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QStyle,
+    QStyleFactory,
     QVBoxLayout,
     QWidget,
 )
 
 from editor import AdvancedEditorDialog
-from image_generation import generate_filename, generate_image, get_font_paths
+from image_generation import (
+    create_character_image,
+    find_unsupported_characters,
+    generate_filename,
+    generate_image,
+    get_font_charset,
+    get_font_colors,
+    get_font_ids,
+    get_font_paths,
+    layout_characters,
+)
 from system_info import readable_size
 from ui_common import (
     ViewSupportedButton,
     about_section,
     load_config,
+    open_supported_characters,
+    resolve_auto_theme,
     save_config,
     set_theme,
+    show_theme_setup_dialog,
+    theme_list,
+    theme_setup_needed,
 )
 
 DEFAULT_COMPRESS_LEVEL = 6
 PREVIEW_COMPRESS_LEVEL = 0
 DISABLE_COMPRESSION = 0
 
-WINDOW_MIN_WIDTH = 700
-WINDOW_MIN_HEIGHT = 640
 INITIAL_PROMPT_DELAY = 100
+PREVIEW_LABEL_MARGIN = 6
 
 MAIN_LAYOUT_SPACING = 18
 MAIN_LAYOUT_MARGIN = 22
@@ -84,6 +103,7 @@ GENERATE_BUTTON_MIN_HEIGHT = 42
 PREVIEW_MIN_HEIGHT = 140
 PREVIEW_TIMER_INTERVAL = 150
 PREVIEW_MAX_DIMENSION = 32768
+PREVIEW_MAX_PIXELS = 32 * 1024 * 1024
 PREVIEW_DIM_OPACITY = 0.55
 PREVIEW_PULSE_MSEC = 160
 
@@ -114,32 +134,39 @@ ZOOM_DEFAULT = 100
 ZOOM_SLIDER_WIDTH = 120
 
 THREAD_WAIT_TIMEOUT_MS = 3000
-
-FONT_COLORS = {
-    1: ["Blue", "Orange", "Gold"],
-    2: ["Blue", "Orange", "Gold"],
-    3: ["Blue", "Orange"],
-    4: ["Blue", "Orange", "Yellow"],
-    5: ["Orange"],
-}
-
-COLORS = {
-    "Blue": "#2596be",
-    "Orange": "#f89000",
-    "Gold": "#f99010",
-    "Yellow": "#f8f900",
-}
-
-ALPHANUMERIC = ascii_letters + digits
-FONT_VALID_CHARS = {
-    1: frozenset(ALPHANUMERIC + " \n" + ',*{}()^:$=!>-∞<#%.+&?";/~_|¥⛶©♥▲▼◀▶⋆★☞✖'),
-    2: frozenset(ALPHANUMERIC + " \n" + ",=︷!-.+&?/♪✖"),
-    3: frozenset(ALPHANUMERIC + " \n" + "'{}():,=!>-<.+?\";/_|¥⛶©♥▲▼◀▶✖"),
-    4: frozenset(ALPHANUMERIC + " \n" + "'*{}()^:$=!>-<#%.+&?\";/~_¥⛶©♥▲▼◀▶|✖"),
-    5: frozenset(ascii_uppercase + digits[1:] + " \n" + "!?"),
-}
+TITLE_STATUS_DURATION_MS = 4000
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def normalize_text(font, text):
+    return text.upper() if font == 5 else text
+
+
+def missing_plugin_message(frozen, plugin_base):
+    if not frozen:
+        return None
+    platforms = Path(plugin_base) / "PySide6" / "plugins" / "platforms"
+    if platforms.is_dir() and any(platforms.iterdir()):
+        return None
+    return (
+        "Qt platform plugins are missing from this installation.\n"
+        f"Expected in: {platforms}\n"
+        "Please reinstall the application. If the problem persists, "
+        "report it together with your OS version."
+    )
+
+
+def pick_style(os_name, release, available):
+    if os_name == "Windows" and release == "11":
+        wanted = "windows11"
+    elif os_name == "Darwin":
+        wanted = "macOS"
+    else:
+        wanted = "Fusion"
+
+    lookup = {style.lower(): style for style in available}
+    return lookup.get(wanted.lower(), "Fusion")
 
 
 class ChromaWarningLabel(QWidget):
@@ -167,7 +194,11 @@ class ChromaWarningLabel(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._update_chroma)
 
-        self.setFixedHeight(WARNING_LABEL_HEIGHT)
+        self.setMinimumHeight(WARNING_LABEL_HEIGHT)
+
+    def sizeHint(self):
+        height = max(WARNING_LABEL_HEIGHT, self.fontMetrics().height() + 8)
+        return QSize(super().sizeHint().width(), height)
 
     def showEvent(self, event):
         self.timer.start(66)
@@ -195,22 +226,53 @@ class ChromaWarningLabel(QWidget):
         painter.end()
 
 
+class ElidedLabel(QLabel):
+
+    def __init__(self, text="", parent=None):
+        super().__init__(parent)
+        self._full_text = ""
+        self.setFixedHeight(self.fontMetrics().height() + 2)
+        self.setText(text)
+
+    def setText(self, text):
+        self._full_text = text
+        self.setToolTip(text)
+        self._elide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self):
+        metrics = self.fontMetrics()
+        super().setText(
+            metrics.elidedText(self._full_text, Qt.ElideRight, max(1, self.width() - 4))
+        )
+
+
 class UnsupportedCharHighlighter(QSyntaxHighlighter):
     def __init__(self, document, font_id=1):
         super().__init__(document)
-        self._valid_chars = FONT_VALID_CHARS.get(font_id, set())
+        self._valid_chars = get_font_charset(font_id)
         self._format = QTextCharFormat()
         self._format.setUnderlineStyle(QTextCharFormat.SpellCheckUnderline)
-        self._format.setUnderlineColor(QColor(255, 0, 0))
-        self._format.setBackground(QColor(255, 0, 0, 40))
+        self.update_theme()
+
+    def update_theme(self, palette=None):
+        if palette is None:
+            palette = QApplication.palette()
+        error = palette.color(QPalette.ColorRole.BrightText)
+        self._format.setUnderlineColor(error)
+        self._format.setBackground(QColor(error.red(), error.green(), error.blue(), 46))
+        self.rehighlight()
 
     def set_font_id(self, font_id):
-        self._valid_chars = FONT_VALID_CHARS.get(font_id, set())
+        self._valid_chars = get_font_charset(font_id)
         self.rehighlight()
 
     def highlightBlock(self, text):
         for i, char in enumerate(text):
-            if char not in self._valid_chars:
+            if char not in self._valid_chars and char.upper() not in self._valid_chars:
                 self.setFormat(i, 1, self._format)
 
 
@@ -226,8 +288,11 @@ class PreviewScrollArea(QScrollArea):
         self._pan_start = None
 
     def set_zoom(self, value):
-        self._zoom = max(ZOOM_MIN, min(ZOOM_MAX, value))
+        self.set_zoom_silent(value)
         self.zoom_changed.emit(self._zoom)
+
+    def set_zoom_silent(self, value):
+        self._zoom = max(ZOOM_MIN, min(ZOOM_MAX, value))
 
     def get_zoom(self):
         return self._zoom
@@ -249,8 +314,9 @@ class PreviewScrollArea(QScrollArea):
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
             delta = event.angleDelta().y()
-            step = 10 if delta > 0 else -10
-            self.set_zoom(self._zoom + step)
+            if delta == 0:
+                return
+            self.set_zoom(self._zoom + (10 if delta > 0 else -10))
             event.accept()
         else:
             super().wheelEvent(event)
@@ -288,7 +354,43 @@ class PreviewScrollArea(QScrollArea):
 
 class ImageWorker(QObject):
     finished = Signal(str, int, int, float)
-    failed = Signal(str)
+    failed = Signal(str, bool)
+    preview_ready = Signal(object)
+    preview_failed = Signal(str, bool)
+
+    @Slot(dict)
+    def process_preview(self, params):
+        font_paths = get_font_paths(params["font"], params["color"])
+        try:
+            _placements, (width, height) = layout_characters(params["text"], font_paths)
+            if (
+                max(width, height) > PREVIEW_MAX_DIMENSION
+                or width * height > PREVIEW_MAX_PIXELS
+            ):
+                self.preview_failed.emit(
+                    "Preview is too large to display!\n"
+                    "The image is perfectly fine, but it exceeds the limits for "
+                    "live previews. It will still generate successfully.",
+                    False,
+                )
+                return
+            image, _width, _height = generate_image(
+                params["text"],
+                "preview",
+                font_paths,
+                None,
+                compress_level=PREVIEW_COMPRESS_LEVEL,
+                return_image=True,
+            )
+            self.preview_ready.emit(image)
+        except PILImage.DecompressionBombError:
+            self.preview_failed.emit("Image is too large to generate!", False)
+        except FileNotFoundError as e:
+            self.preview_failed.emit(
+                f"{e}\n\nPlease remove it to see the preview.", True
+            )
+        except Exception as e:  # noqa: BLE001
+            self.preview_failed.emit(str(e), False)
 
     @Slot(dict)
     def process(self, params):
@@ -314,53 +416,149 @@ class ImageWorker(QObject):
                 "Whoa, that's a massive image!\n\n"
                 "The text you entered is so long that the generated image exceeds the system's maximum pixel limit. "
                 "Computers have a hard cap on how wide or tall an image can be.\n\n"
-                "To fix this, try shortening your text."
+                "To fix this, try shortening your text.",
+                False,
             )
+        except FileNotFoundError as e:
+            self.failed.emit(str(e), True)
         except Exception as e:  # noqa: BLE001
-            self.failed.emit(str(e))
+            self.failed.emit(str(e), False)
 
 
 class MainWindow(QMainWindow):
     trigger_generation = Signal(dict)
+    trigger_preview = Signal(dict)
 
     _color_icons: ClassVar[dict[str, QIcon]] = {}
 
     def __init__(self):
         super().__init__()
+        self._title_status = None
+        self._generating = False
+        self._closed = False
+        self._last_skipped = []
+        self._theme_actions = {}
+        self._theme_follower_connected = False
+        self._title_timer = QTimer(self)
+        self._title_timer.setSingleShot(True)
+        self._title_timer.setInterval(TITLE_STATUS_DURATION_MS)
+        self._title_timer.timeout.connect(self._clear_title_status)
         self.setWindowTitle("MetalSlugFontReborn")
         self.setWindowIcon(
             QIcon(str(PROJECT_ROOT / "Assets" / "Icons" / "Raubtier.ico"))
         )
-        self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
-        self.save_path = Path.home() / "Desktop"
+        self.resize(760, 720)
+        desktop = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DesktopLocation
+        )
+        self.default_save_path = Path(desktop) if desktop else Path.home()
+        self.save_path = self.default_save_path
 
         self._create_color_icons()
         self.setup_thread()
         self.setup_ui()
         set_theme()
+        saved_theme = load_config("theme")
+        if not isinstance(saved_theme, str) or saved_theme not in theme_list:
+            saved_theme = None
+        self._sync_theme_menu(saved_theme or resolve_auto_theme())
+        self.highlighter.update_theme(QApplication.palette())
+        self._update_native_chrome()
+        if saved_theme is None:
+            QApplication.styleHints().colorSchemeChanged.connect(
+                self._on_system_theme_changed
+            )
+            self._theme_follower_connected = True
 
         QTimer.singleShot(INITIAL_PROMPT_DELAY, self.prompt_save_location)
 
+    def _on_system_theme_changed(self, _scheme):
+        saved = load_config("theme")
+        if self._closed or (isinstance(saved, str) and saved in theme_list):
+            return
+        set_theme()
+        self._sync_theme_menu(resolve_auto_theme())
+        self.highlighter.update_theme(QApplication.palette())
+        self._update_native_chrome()
+
+    def _apply_theme(self, name):
+        set_theme(name)
+        self._sync_theme_menu(name)
+        self.highlighter.update_theme(QApplication.palette())
+        self._update_native_chrome()
+
+    def _sync_theme_menu(self, active_name):
+        for theme, action in self._theme_actions.items():
+            action.setChecked(theme == active_name)
+
+    def _update_native_chrome(self):
+        if platform.system() != "Windows":
+            return
+        dark = QApplication.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        try:
+            import ctypes
+
+            hwnd = int(self.winId())
+            value = ctypes.c_int(1 if dark else 0)
+            for attribute in (20, 19):
+                if (
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                        hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value)
+                    )
+                    == 0
+                ):
+                    break
+        except (OSError, AttributeError):
+            pass
+
     @classmethod
     def _create_color_icons(cls):
-        if cls._color_icons:
-            return
-
-        for color_name, hex_color in COLORS.items():
+        color_names = sorted(
+            {name for font in get_font_ids() for name in get_font_colors(font)}
+        )
+        for color_name in color_names:
+            if color_name in cls._color_icons:
+                continue
+            palette = cls._sample_color_palette(color_name)
             size = COLOR_ICON_SIZE
             pixmap = QPixmap(size, size)
             pixmap.fill(Qt.transparent)
 
             painter = QPainter(pixmap)
             painter.setRenderHint(QPainter.Antialiasing)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(hex_color))
-
             margin = COLOR_ICON_MARGIN
-            painter.drawEllipse(margin, margin, size - 2 * margin, size - 2 * margin)
+            rect = QRectF(margin, margin, size - 2 * margin, size - 2 * margin)
+            slice_span = 360 * 16 // len(palette)
+            start_angle = 90 * 16
+            for rgb in palette:
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(*rgb))
+                painter.drawPie(rect, start_angle, -slice_span)
+                start_angle -= slice_span
+            painter.setPen(QPen(QColor(*palette[0]).darker(160), 1))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(rect)
             painter.end()
 
             cls._color_icons[color_name] = QIcon(pixmap)
+
+    @staticmethod
+    def _sample_color_palette(color_name, max_colors=6):
+        for font in get_font_ids():
+            if color_name not in get_font_colors(font):
+                continue
+            try:
+                sprite = create_character_image("A", get_font_paths(font, color_name))
+                ranked = sorted(
+                    sprite.convert("RGBA").getcolors(65536) or [],
+                    key=lambda item: -item[0],
+                )
+                palette = [color[:3] for _count, color in ranked if color[3] > 127]
+                if palette:
+                    return palette[:max_colors]
+            except (OSError, ValueError):
+                continue
+        return [(128, 128, 128)]
 
     def setup_thread(self):
         self._thread = QThread()
@@ -369,11 +567,20 @@ class MainWindow(QMainWindow):
 
         self._worker.finished.connect(self.on_generation_finished)
         self._worker.failed.connect(self.on_generation_failed)
+        self._worker.preview_ready.connect(self._on_preview_ready)
+        self._worker.preview_failed.connect(self._on_preview_failed)
         self.trigger_generation.connect(self._worker.process)
+        self.trigger_preview.connect(self._worker.process_preview)
 
         self._thread.start(QThread.Priority.LowPriority)
 
     def closeEvent(self, event):
+        self._closed = True
+        if self._theme_follower_connected:
+            QApplication.styleHints().colorSchemeChanged.disconnect(
+                self._on_system_theme_changed
+            )
+            self._theme_follower_connected = False
         self._thread.quit()
         if not self._thread.wait(THREAD_WAIT_TIMEOUT_MS):
             self._thread.terminate()
@@ -383,6 +590,18 @@ class MainWindow(QMainWindow):
     def setup_ui(self):
         self._preview_user_zoomed = False
         self._last_preview = None
+        self._preview_pending = False
+        self._preview_queued = None
+
+        self.preview_timer = QTimer(self)
+        self.preview_timer.setSingleShot(True)
+        self.preview_timer.setInterval(PREVIEW_TIMER_INTERVAL)
+        self.preview_timer.timeout.connect(self.update_preview)
+
+        self.char_count_timer = QTimer(self)
+        self.char_count_timer.setSingleShot(True)
+        self.char_count_timer.setInterval(CHAR_COUNT_TIMER_INTERVAL)
+        self.char_count_timer.timeout.connect(self.update_character_count)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -444,35 +663,39 @@ class MainWindow(QMainWindow):
             self.text_input.document(), font_id=1
         )
 
-        self.unsupported_hint = QLabel()
-        self.unsupported_hint.setWordWrap(True)
+        self.unsupported_hint = ElidedLabel()
+        self.unsupported_hint.setAlignment(Qt.AlignCenter)
         self.unsupported_hint.setStyleSheet(
             "color: palette(bright-text); font-style: italic;"
         )
-        self.unsupported_hint.setVisible(False)
 
         self.text_info_layout = QHBoxLayout()
         self.char_count_label = QLabel("Characters: 0")
         self.text_info_layout.addWidget(self.char_count_label)
         self.text_info_layout.addStretch()
-        self.text_info_layout.addWidget(self.unsupported_hint)
-        self.text_info_layout.addStretch()
+        self.text_info_layout.addWidget(self.unsupported_hint, 1)
 
         self.dimensions_label = QLabel("Resolution: -")
         self.text_info_layout.addWidget(self.dimensions_label)
+
+        self.clear_button = QPushButton("Clear")
+        self.clear_button.setToolTip("Clear the text.")
+        self.clear_button.clicked.connect(self.text_input.clear)
+        self.clear_button.setEnabled(False)
+        self.text_info_layout.addWidget(self.clear_button)
 
         text_layout.addLayout(self.text_info_layout)
         main_layout.addWidget(text_group)
 
     def _build_preview_section(self, main_layout):
-        preview_group = QGroupBox("Font & Preview")
+        self.preview_group = preview_group = QGroupBox("Font & Preview")
         preview_layout = QVBoxLayout(preview_group)
         preview_layout.setSpacing(12)
 
         picker_row = QHBoxLayout()
         picker_row.addWidget(QLabel("Font:"))
         self.font_select = QComboBox()
-        self.font_select.addItems(map(str, sorted(FONT_COLORS)))
+        self.font_select.addItems(map(str, get_font_ids()))
         self.font_select.setToolTip(
             "Metal Slug font style. Font 5 supports uppercase letters only."
         )
@@ -495,7 +718,9 @@ class MainWindow(QMainWindow):
         preview_layout.addWidget(self.font5_warning)
 
         self.preview_scroll = PreviewScrollArea()
-        self.preview_scroll.setMinimumHeight(PREVIEW_MIN_HEIGHT)
+        self.preview_scroll.setMinimumHeight(
+            max(PREVIEW_MIN_HEIGHT, self.fontMetrics().height() * 8)
+        )
         self.preview_scroll.setToolTip(
             "Live preview. Ctrl + mouse wheel to zoom, drag to pan."
         )
@@ -503,6 +728,7 @@ class MainWindow(QMainWindow):
 
         self.preview_label = QLabel()
         self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setMargin(PREVIEW_LABEL_MARGIN)
         self.preview_label.setText("Loading preview...")
         self.preview_scroll.setWidget(self.preview_label)
 
@@ -538,7 +764,9 @@ class MainWindow(QMainWindow):
         status_row.addWidget(self.zoom_slider)
 
         self.zoom_label = QLabel(f"{ZOOM_DEFAULT}%")
-        self.zoom_label.setFixedWidth(40)
+        self.zoom_label.setFixedWidth(
+            max(40, self.fontMetrics().horizontalAdvance("100%") + 12)
+        )
         status_row.addWidget(self.zoom_label)
 
         self.zoom_fit_btn = QPushButton("Fit")
@@ -548,17 +776,12 @@ class MainWindow(QMainWindow):
         self.zoom_fit_btn.clicked.connect(self.fit_preview)
         status_row.addWidget(self.zoom_fit_btn)
 
+        self.zoom_native_btn = QPushButton("100%")
+        self.zoom_native_btn.setToolTip("Reset the preview to native size (100%).")
+        self.zoom_native_btn.clicked.connect(self._reset_zoom_native)
+        status_row.addWidget(self.zoom_native_btn)
+
         preview_layout.addLayout(status_row)
-
-        self.preview_timer = QTimer(self)
-        self.preview_timer.setSingleShot(True)
-        self.preview_timer.setInterval(PREVIEW_TIMER_INTERVAL)
-        self.preview_timer.timeout.connect(self.update_preview)
-
-        self.char_count_timer = QTimer(self)
-        self.char_count_timer.setSingleShot(True)
-        self.char_count_timer.setInterval(CHAR_COUNT_TIMER_INTERVAL)
-        self.char_count_timer.timeout.connect(self.update_character_count)
 
         main_layout.addWidget(preview_group, 1)
 
@@ -585,7 +808,7 @@ class MainWindow(QMainWindow):
         self.scale_select.setToolTip(
             "Make the exported image larger. 1x matches the game's native resolution."
         )
-        self.scale_select.currentIndexChanged.connect(self.schedule_preview_update)
+        self.scale_select.currentIndexChanged.connect(self._apply_zoom_to_preview)
         grid.addWidget(self.scale_select, 0, 1)
 
         self.compress_option = QCheckBox("Compress PNG")
@@ -614,10 +837,16 @@ class MainWindow(QMainWindow):
         )
 
         self.compress_level_label = QLabel(str(DEFAULT_COMPRESS_LEVEL))
-        self.compress_level_label.setFixedWidth(COMPRESS_LEVEL_LABEL_WIDTH)
+        self.compress_level_label.setFixedWidth(
+            max(
+                COMPRESS_LEVEL_LABEL_WIDTH,
+                self.fontMetrics().horizontalAdvance("9") + 8,
+            )
+        )
 
         self.compress_hint_label = QLabel()
         self.compress_hint_label.setStyleSheet("font-style: italic;")
+        self.update_compress_level_label(DEFAULT_COMPRESS_LEVEL)
 
         self.level_layout.addWidget(self.compress_level_slider)
         self.level_layout.addWidget(self.compress_level_label)
@@ -669,21 +898,24 @@ class MainWindow(QMainWindow):
         self.output_content.setVisible(checked)
 
     def _populate_font_preview_icons(self):
-        for font_id in sorted(FONT_COLORS):
-            color = FONT_COLORS[font_id][0]
-            font_paths = get_font_paths(font_id, color)
-            pil_img, _, _ = generate_image(
-                "ABC",
-                "thumbnail",
-                font_paths,
-                None,
-                compress_level=0,
-                return_image=True,
-                scale=1,
-            )
+        for font_id in get_font_ids():
+            colors = get_font_colors(font_id)
+            if not colors:
+                continue
+            try:
+                font_paths = get_font_paths(font_id, colors[0])
+                pil_img, _, _ = generate_image(
+                    "ABC",
+                    "thumbnail",
+                    font_paths,
+                    None,
+                    compress_level=0,
+                    return_image=True,
+                    scale=1,
+                )
+            except (OSError, ValueError):
+                continue
             pil_img.thumbnail((48, 24), PILImage.Resampling.NEAREST)
-            from PIL import ImageQt
-
             qimg = ImageQt.ImageQt(pil_img)
             pixmap = QPixmap.fromImage(qimg)
             self.font_select.setItemIcon(
@@ -697,19 +929,26 @@ class MainWindow(QMainWindow):
 
     def _on_zoom_changed(self, value):
         self._preview_user_zoomed = True
+        self.preview_scroll.set_zoom_silent(value)
         self.zoom_label.setText(f"{value}%")
         self._apply_zoom_to_preview()
 
     def _on_zoom_changed_external(self, value):
-        self._preview_user_zoomed = True
+        clamped = max(ZOOM_MIN, min(ZOOM_MAX, value))
+        if clamped != self.zoom_slider.value():
+            self._preview_user_zoomed = True
         self.zoom_slider.blockSignals(True)
-        self.zoom_slider.setValue(value)
+        self.zoom_slider.setValue(clamped)
         self.zoom_slider.blockSignals(False)
-        self.zoom_label.setText(f"{value}%")
+        self.preview_scroll.set_zoom_silent(clamped)
+        self.zoom_label.setText(f"{clamped}%")
         self._apply_zoom_to_preview()
 
     def _apply_zoom_to_preview(self):
-        self.update_preview()
+        if self._last_preview is not None:
+            self._display_preview_image(*self._last_preview)
+        else:
+            self.preview_timer.start()
 
     def _get_preview_zoom_factor(self):
         return self.zoom_slider.value() / 100.0
@@ -730,20 +969,27 @@ class MainWindow(QMainWindow):
         else:
             self.schedule_preview_update()
 
+    def _reset_zoom_native(self):
+        self._preview_user_zoomed = True
+        self.zoom_slider.setValue(100)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if not self._preview_user_zoomed and self._last_preview is not None:
-            self.preview_timer.start()
+        if not self._preview_user_zoomed:
+            self._apply_zoom_to_preview()
 
     def update_generate_button_state(self):
-        has_text = bool(self.text_input.toPlainText().strip())
+        has_text = bool(self.text_input.toPlainText().strip()) and not self._generating
         self.generate_btn.setEnabled(has_text)
         self.advanced_btn.setEnabled(has_text)
+        self.clear_button.setEnabled(bool(self.text_input.toPlainText()))
         self._update_window_title()
 
     def _update_window_title(self):
-        text = self.text_input.toPlainText().strip()
-        char_count = len(text)
+        if self._title_status:
+            self.setWindowTitle(f"MetalSlugFontReborn - {self._title_status}")
+            return
+        char_count = len(self.text_input.toPlainText().strip())
         self.setWindowTitle(f"MetalSlugFontReborn - {char_count} characters")
 
     def schedule_preview_update(self):
@@ -761,6 +1007,7 @@ class MainWindow(QMainWindow):
             self.preview_pulse.start()
 
     def _set_preview_error(self, message):
+        self._last_preview = None
         self.preview_label.setPixmap(QPixmap())
         self.preview_label.setText(message)
         self.dimensions_label.setText("Resolution: -")
@@ -776,31 +1023,34 @@ class MainWindow(QMainWindow):
         zoom_factor = self._get_preview_zoom_factor()
         if not self._preview_user_zoomed:
             zoom_factor = self._fit_zoom_factor(out_w, out_h)
-            pct = max(1, round(zoom_factor * 100))
+            pct = max(ZOOM_MIN, min(ZOOM_MAX, round(zoom_factor * 100)))
             self.zoom_slider.blockSignals(True)
-            self.zoom_slider.setValue(max(ZOOM_MIN, min(ZOOM_MAX, pct)))
+            self.zoom_slider.setValue(pct)
             self.zoom_slider.blockSignals(False)
+            self.preview_scroll.set_zoom_silent(pct)
             self.zoom_label.setText(f"{pct}%")
 
         width = int(out_w * zoom_factor)
         height = int(out_h * zoom_factor)
 
-        if width > PREVIEW_MAX_DIMENSION or height > PREVIEW_MAX_DIMENSION:
+        if (
+            width > PREVIEW_MAX_DIMENSION
+            or height > PREVIEW_MAX_DIMENSION
+            or width * height > PREVIEW_MAX_PIXELS
+        ):
             self._set_preview_error(
                 "Preview is too large to display!\n"
-                "The image is perfectly fine, but it exceeds the 32,000 pixel limit for live previews.\n"
+                "The image is perfectly fine, but it exceeds the limits for live previews.\n"
                 "It will still generate successfully."
             )
             return
 
-        preview_image = pil_image.copy()
-
         if width != pil_image.width or height != pil_image.height:
-            preview_image = preview_image.resize(
+            preview_image = pil_image.resize(
                 (max(1, width), max(1, height)), PILImage.Resampling.NEAREST
             )
-
-        from PIL import ImageQt
+        else:
+            preview_image = pil_image
 
         qimage = ImageQt.ImageQt(preview_image)
         pixmap = QPixmap.fromImage(qimage)
@@ -812,40 +1062,59 @@ class MainWindow(QMainWindow):
         if pixmap.isNull():
             self._set_preview_error("Preview unavailable")
 
-    def update_preview(self):
+    def _clean_text(self):
         font = int(self.font_select.currentText())
-        color = self.color_select.currentText()
-        text = self.text_input.toPlainText().strip() or "METAL SLUG IS PEAK!"
+        text = normalize_text(font, self.text_input.toPlainText().strip())
+        skipped = find_unsupported_characters(text, font)
+        if skipped:
+            text = "".join(ch for ch in text if ch not in set(skipped))
+        return font, text, skipped
 
-        if font == 5:
-            text = text.upper()
+    def update_preview(self):
+        if not self.font_select.currentText():
+            return
+        font, text, _skipped = self._clean_text()
+        params = {
+            "text": text or "METAL SLUG IS PEAK!",
+            "font": font,
+            "color": self.color_select.currentText(),
+        }
+        self._request_preview(params)
 
-        try:
-            font_paths = get_font_paths(font, color)
-            pil_image, _, _ = generate_image(
-                text,
-                "preview",
-                font_paths,
-                None,
-                compress_level=PREVIEW_COMPRESS_LEVEL,
-                return_image=True,
-            )
+    def _request_preview(self, params):
+        if self._preview_pending:
+            self._preview_queued = params
+            return
+        self._preview_pending = True
+        self.trigger_preview.emit(params)
 
-            if pil_image is None:
-                self._set_preview_error("Preview unavailable")
-                return
+    def _flush_preview_queue(self):
+        if not self._preview_pending:
+            return False
+        queued = self._preview_queued
+        self._preview_queued = None
+        if queued is None:
+            self._preview_pending = False
+            return False
+        self.trigger_preview.emit(queued)
+        return True
 
+    @Slot(object)
+    def _on_preview_ready(self, image):
+        if self._closed:
+            return
+        if not self._flush_preview_queue():
             scale = self.scale_select.currentIndex() + 1
-            self._display_preview_image(pil_image, scale)
+            self._display_preview_image(image, scale)
 
-        except PILImage.DecompressionBombError:
-            self._set_preview_error("Image is too large to generate!")
-        except FileNotFoundError as e:
-            self._set_preview_error(f"{e}\n\nPlease remove it to see the preview.")
-            self.supported_btn.reveal()
-        except Exception as e:  # noqa: BLE001
-            self._set_preview_error(f"Preview unavailable.\n\nError: {e!s}")
-            self.supported_btn.reveal()
+    @Slot(str, bool)
+    def _on_preview_failed(self, message, reveal_supported_button):
+        if self._closed:
+            return
+        if not self._flush_preview_queue():
+            self._set_preview_error(f"Preview unavailable.\n\nError: {message}")
+            if reveal_supported_button:
+                self.supported_btn.reveal()
 
     def update_character_count(self):
         text = self.text_input.toPlainText()
@@ -854,20 +1123,20 @@ class MainWindow(QMainWindow):
         self._update_window_title()
 
     def _update_unsupported_hint(self, text):
-        valid = FONT_VALID_CHARS[int(self.font_select.currentText())]
-        bad = sum(1 for ch in text if ch not in valid)
+        valid = get_font_charset(int(self.font_select.currentText()))
+        bad = sum(1 for ch in text if ch not in valid and ch.upper() not in valid)
         if bad:
+            noun = "character is" if bad == 1 else "characters are"
             self.unsupported_hint.setText(
-                f"{bad} unsupported character(s), highlighted red, skipped in the output"
+                f"{bad} {noun} not supported by this font and will be skipped"
             )
-            self.unsupported_hint.setVisible(True)
         else:
-            self.unsupported_hint.setVisible(False)
+            self.unsupported_hint.setText("")
 
     def update_save_location_display(self):
         folder_name = self.save_path.name
         display_text = f"Save location: {folder_name}"
-        if self.save_path == Path.home() / "Desktop":
+        if self.save_path == self.default_save_path:
             display_text += " (default)"
 
         self.save_location_label.setText(display_text)
@@ -875,7 +1144,7 @@ class MainWindow(QMainWindow):
         self.save_location_label.setToolTipDuration(TOOLTIP_DURATION)
 
     def prompt_save_location(self):
-        if load_config("skip_location_prompt", fallback=False):
+        if self._closed or load_config("skip_location_prompt", fallback=False):
             return
 
         msg_box = QMessageBox(self)
@@ -905,10 +1174,16 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Exit").triggered.connect(self.close)
 
         theme_menu = menubar.addMenu("Themes")
-        for theme in ["Light", "Dark", "Tokyo Night"]:
-            theme_menu.addAction(f"{theme} Mode").triggered.connect(
-                lambda _, t=theme: set_theme(t)
-            )
+        saved_theme = load_config("theme")
+        if not isinstance(saved_theme, str) or saved_theme not in theme_list:
+            saved_theme = None
+        active_theme = saved_theme or resolve_auto_theme()
+        for theme in theme_list:
+            action = theme_menu.addAction(f"{theme} Mode")
+            action.setCheckable(True)
+            action.setChecked(theme == active_theme)
+            action.triggered.connect(lambda _, t=theme: self._apply_theme(t))
+            self._theme_actions[theme] = action
 
         help_menu = menubar.addMenu("Help")
         help_menu.addAction("About MetalSlugFontReborn").triggered.connect(
@@ -989,11 +1264,14 @@ class MainWindow(QMainWindow):
 
     def update_colors(self):
         self.color_select.clear()
+        if not self.font_select.currentText():
+            return
         font = int(self.font_select.currentText())
 
         self.font5_warning.setVisible(font == 5)
+        self._create_color_icons()
 
-        for color_name in FONT_COLORS[font]:
+        for color_name in get_font_colors(font):
             self.color_select.addItem(self._color_icons[color_name], color_name)
 
     def toggle_compression_options(self, checked):
@@ -1020,10 +1298,9 @@ class MainWindow(QMainWindow):
             )
 
     def _collect_params(self):
-        text = self.text_input.toPlainText().strip()
-        font = int(self.font_select.currentText())
-        if font == 5:
-            text = text.upper()
+        if not self.font_select.currentText():
+            return {}
+        font, text, skipped = self._clean_text()
 
         compress_enabled = self.compress_option.isChecked()
         return {
@@ -1031,35 +1308,56 @@ class MainWindow(QMainWindow):
             "font": font,
             "color": self.color_select.currentText(),
             "save_path": str(self.save_path),
-            "compress": compress_enabled,
             "compress_level": (
                 self.compress_level_slider.value()
                 if compress_enabled
                 else DISABLE_COMPRESSION
             ),
             "scale": self.scale_select.currentIndex() + 1,
+            "skipped": skipped,
         }
 
+    def _show_not_supported_dialog(self):
+        box = QMessageBox(self)
+        box.setWindowTitle("Not Supported by This Font")
+        box.setText(
+            "None of the characters you typed are supported by this font. "
+            "Open the supported characters list to see what it can render."
+        )
+        view_button = box.addButton("View Supported Characters", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Close)
+        box.exec()
+        if box.clickedButton() is view_button:
+            open_supported_characters(self)
+
     def generate_image(self):
+        if self._generating:
+            return
         params = self._collect_params()
-        if not params["text"]:
+        self._last_skipped = params.get("skipped", [])
+        if not params.get("text", ""):
+            if self._last_skipped:
+                self._show_not_supported_dialog()
             return
 
-        self.generate_btn.setEnabled(False)
+        self._generating = True
         self.generate_btn.setText("Generating...")
-        self.setWindowTitle("MetalSlugFontReborn - Generating...")
+        self._title_status = "Generating..."
+        self.update_generate_button_state()
 
         self.trigger_generation.emit(params)
 
     def open_advanced_editor(self):
         params = self._collect_params()
-        if not params["text"]:
+        if not params.get("text", ""):
+            if params.get("skipped"):
+                self._show_not_supported_dialog()
             return
 
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             dialog = AdvancedEditorDialog(
-                self, params, FONT_VALID_CHARS[params["font"]]
+                self, params, get_font_charset(params["font"])
             )
         except FileNotFoundError as e:
             QMessageBox.critical(self, "Missing Asset", str(e))
@@ -1081,11 +1379,38 @@ class MainWindow(QMainWindow):
         else:
             environ.pop(key, None)
 
+    @staticmethod
+    def _open_externally(path):
+        if not path.exists():
+            return False
+        url = QUrl.fromLocalFile(str(path))
+        if platform.system() != "Linux":
+            return QDesktopServices.openUrl(url)
+        current_ld = environ.get("LD_LIBRARY_PATH")
+        MainWindow._set_env("LD_LIBRARY_PATH", environ.get("LD_LIBRARY_PATH_ORIG"))
+        try:
+            return QDesktopServices.openUrl(url)
+        finally:
+            MainWindow._set_env("LD_LIBRARY_PATH", current_ld)
+
+    def _clear_title_status(self):
+        if self._generating:
+            self._title_timer.start()
+            return
+        self._title_status = None
+        self._update_window_title()
+
     @Slot(str, int, int, float)
     def on_generation_finished(self, image_path, width, height, start_time):
+        if self._closed:
+            return
+        self._generating = False
         self.generate_btn.setText("Generate Image")
         self.update_generate_button_state()
         self.supported_btn.reset_to_normal()
+        self._title_status = "Image saved"
+        self._update_window_title()
+        self._title_timer.start()
 
         path = Path(image_path)
         try:
@@ -1097,6 +1422,10 @@ class MainWindow(QMainWindow):
                 f"File size: {size}\n"
                 f"Time taken: {time() - start_time:.3f} seconds"
             )
+            if self._last_skipped:
+                message += "\n\nSkipped, not supported by this font: " + " ".join(
+                    self._last_skipped
+                )
 
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("Success")
@@ -1105,52 +1434,89 @@ class MainWindow(QMainWindow):
 
             ok_button = msg_box.addButton(QMessageBox.Ok)
             open_button = msg_box.addButton("Open Image", QMessageBox.AcceptRole)
+            folder_button = msg_box.addButton("Open Folder", QMessageBox.AcceptRole)
             msg_box.setDefaultButton(ok_button)
 
             msg_box.exec()
 
-            if msg_box.clickedButton() != open_button:
+            clicked = msg_box.clickedButton()
+            if clicked not in (open_button, folder_button):
                 return
 
-            url = QUrl.fromLocalFile(str(path))
+            target = path if clicked == open_button else path.parent
+            if self._open_externally(target):
+                return
 
-            if platform.system() == "Linux":
-                current_ld = environ.get("LD_LIBRARY_PATH")
-                MainWindow._set_env(
-                    "LD_LIBRARY_PATH", environ.get("LD_LIBRARY_PATH_ORIG")
+            if clicked == folder_button:
+                QMessageBox.information(
+                    self, "Save Location", f"The image is located at:\n{path}"
                 )
-                try:
-                    QDesktopServices.openUrl(url)
-                finally:
-                    MainWindow._set_env("LD_LIBRARY_PATH", current_ld)
-            else:
-                QDesktopServices.openUrl(url)
+                return
+
+            retry = QMessageBox(self)
+            retry.setWindowTitle("Could not open image")
+            retry.setText(
+                f"The system could not display:\n{path}\n\n"
+                "Open the folder that contains it instead?"
+            )
+            retry.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            retry.setDefaultButton(QMessageBox.Yes)
+            if retry.exec() == QMessageBox.Yes and not self._open_externally(
+                path.parent
+            ):
+                QMessageBox.information(
+                    self, "Save Location", f"The image is located at:\n{path}"
+                )
 
         except OSError as e:
             QMessageBox.critical(
                 self, "Error", f"Failed to read generated image metadata:\n{e!s}"
             )
 
-    @Slot(str)
-    def on_generation_failed(self, error_msg):
+    @Slot(str, bool)
+    def on_generation_failed(self, error_msg, reveal_supported_button):
+        if self._closed:
+            return
+        self._generating = False
         self.generate_btn.setText("Generate Image")
         self.update_generate_button_state()
+        self._title_status = None
+        self._update_window_title()
         QMessageBox.critical(self, "Error", error_msg)
-        self.supported_btn.reveal()
+        if reveal_supported_button:
+            self.supported_btn.reveal()
 
 
 if __name__ == "__main__":
+    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+        environ.setdefault("QT_IM_MODULE", "compose")
+
+    plugin_hint = missing_plugin_message(
+        getattr(sys, "frozen", False),
+        Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)),
+    )
+    if plugin_hint:
+        print(plugin_hint, file=sys.stderr)
+        if sys.platform == "win32":
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(
+                None, plugin_hint, "MetalSlugFontReborn", 0x10
+            )
+        sys.exit(1)
+
     app = QApplication(sys.argv)
-    os_name = platform.system()
-    release = platform.release()
-    if os_name == "Windows" and release == "11":
-        app.setStyle("FluentWinUI3")
-    elif os_name == "Windows" and release == "10" or os_name == "Linux":
-        app.setStyle("Fusion")
-    elif os_name == "Darwin":
-        app.setStyle("macOS")
-    else:
-        app.setStyle("Fusion")
+    app.setApplicationName("MetalSlugFontReborn")
+    app.setOrganizationName("MetalSlugFontReborn")
+    if sys.platform.startswith("linux"):
+        app.setDesktopFileName("MetalSlugFontReborn")
+    app.setStyle(
+        pick_style(platform.system(), platform.release(), QStyleFactory.keys())
+    )
+
+    if theme_setup_needed() or environ.get("MSFR_SHOW_THEME_PROMPT") == "1":
+        show_theme_setup_dialog()
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

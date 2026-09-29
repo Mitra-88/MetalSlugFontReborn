@@ -1,7 +1,43 @@
 import math
 import platform
+import subprocess
+import sys
 from datetime import datetime
-from uuid import uuid4
+from pathlib import Path
+from time import time
+
+APP_VERSION = "3.2.0"
+
+
+def _build_timestamp():
+    if getattr(sys, "frozen", False):
+        try:
+            return Path(sys.executable).stat().st_mtime
+        except OSError:
+            return time()
+    return time()
+
+
+def _git_commit():
+    if getattr(sys, "frozen", False):
+        commit_file = Path(getattr(sys, "_MEIPASS", ".")) / "build_commit.txt"
+        try:
+            return commit_file.read_text(encoding="utf-8").strip() or "release"
+        except OSError:
+            return "release"
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+            cwd=Path(__file__).resolve().parent.parent,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return result.stdout.strip() or "dev"
+    except (OSError, subprocess.SubprocessError):
+        return "dev"
 
 
 def readable_size(size_bytes):
@@ -78,5 +114,9 @@ def get_system_info() -> str:
     return join_parts(system, platform.release(), arch)
 
 
-msfr_version = f"3.1.0 ({uuid4().hex[:7]})"
-build_date = datetime.now().astimezone().strftime("%Y-%m-%d (%A, %B %d)")
+msfr_version = f"{APP_VERSION} ({_git_commit()})"
+build_date = (
+    datetime.fromtimestamp(_build_timestamp())
+    .astimezone()
+    .strftime("%Y-%m-%d (%A, %B %d)")
+)

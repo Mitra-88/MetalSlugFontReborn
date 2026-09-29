@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MetalSlugFontReborn
+GenericName=Metal Slug Text Art Generator
+Comment=Render text as Metal Slug style PNG art
+Exec=MetalSlugFontReborn
+Icon=MetalSlugFontReborn
+Terminal=false
+Categories=Graphics;
