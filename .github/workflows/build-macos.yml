@@ -58,6 +58,8 @@ jobs:
           cd dist/MetalSlugFontReborn/_internal
           rm -rf PySide6/translations PySide6/plugins/tls PySide6/plugins/networkinformation PySide6/plugins/generic PySide6/plugins/iconengines setuptools
           rm -f PySide6/opengl32sw.dll PySide6/Qt6Network* PySide6/Qt6Svg* PySide6/libQt6Network* PySide6/libQt6Svg* libcrypto* libssl*
+          rm -rf PySide6/Qt/translations PySide6/Qt/plugins/tls PySide6/Qt/plugins/networkinformation PySide6/Qt/plugins/generic PySide6/Qt/plugins/iconengines
+          rm -f PySide6/Qt/lib/libQt6Network* PySide6/Qt/lib/libQt6Svg* PySide6/Qt/lib/libcrypto* PySide6/Qt/lib/libssl*
 
       - name: Move Assets
         run: |

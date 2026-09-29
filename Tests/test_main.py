@@ -242,13 +242,49 @@ def test_missing_plugin_message_diagnoses_frozen_installs(tmp_path):
 
     message = missing_plugin_message(True, tmp_path)
     assert message is not None
-    assert "platform plugins" in message
+    assert "incomplete" in message
     assert str(tmp_path) in message
 
     platforms = tmp_path / "PySide6" / "plugins" / "platforms"
     platforms.mkdir(parents=True)
     (platforms / "qwindows.dll").write_bytes(b"x")
     assert missing_plugin_message(True, tmp_path) is None
+
+
+def test_missing_plugin_message_accepts_qt_subdir_layout(tmp_path):
+    from main import missing_plugin_message
+
+    platforms = tmp_path / "PySide6" / "Qt" / "plugins" / "platforms"
+    platforms.mkdir(parents=True)
+    (platforms / "libqxcb.so").write_bytes(b"x")
+    assert missing_plugin_message(True, tmp_path) is None
+
+
+def test_linux_graphics_library_hint_lists_missing_packages(monkeypatch):
+    import sys
+
+    import main
+
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    class FakeProbe:
+        def __init__(self, missing):
+            self.missing = set(missing)
+
+        def __call__(self, soname):
+            if soname in self.missing:
+                raise OSError(soname)
+
+    hint = main.linux_graphics_library_hint(
+        probe=FakeProbe(["libxcb-cursor.so.0", "libxcb-xkb.so.1"])
+    )
+    assert hint is not None
+    assert "libxcb-cursor0" in hint
+    assert "libxcb-xkb1" in hint
+    assert "sudo apt install" in hint
+    assert "libxcb-image0" not in hint
+
+    assert main.linux_graphics_library_hint(probe=FakeProbe([])) is None
 
 
 def test_theme_follows_live_system_change(qapp, tmp_path, monkeypatch):
