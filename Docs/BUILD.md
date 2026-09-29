@@ -104,23 +104,3 @@ rm -f dist/MetalSlugFontReborn/_internal/PySide6/Qt6Network* dist/MetalSlugFontR
 ```
 
 On macOS the rotation library is named `libmsfr_rotsprite.dylib`, so use that file name in the `--add-binary` flag.
-
-### Linux AppImage
-
-On Linux you can wrap the build above into a single AppImage file. `libfuse2` is needed on some distributions to run the packaging tools, and they also work without it through `APPIMAGE_EXTRACT_AND_RUN=1`.
-
-```sh
-wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-chmod +x linuxdeploy-x86_64.AppImage
-mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/128x128/apps
-cp -r dist/MetalSlugFontReborn AppDir/usr/bin/MetalSlugFontReborn
-cp Deploy/linux/AppRun AppDir/AppRun
-cp Deploy/linux/MetalSlugFontReborn.desktop AppDir/
-cp Assets/Icons/Raubtier.png AppDir/MetalSlugFontReborn.png
-cp Assets/Icons/Raubtier.png AppDir/usr/share/icons/hicolor/128x128/apps/MetalSlugFontReborn.png
-chmod +x AppDir/AppRun AppDir/usr/bin/MetalSlugFontReborn/MetalSlugFontReborn
-APPIMAGE_EXTRACT_AND_RUN=1 ./linuxdeploy-x86_64.AppImage --appdir AppDir -d AppDir/MetalSlugFontReborn.desktop --output appimage
-chmod +x MetalSlugFontReborn*.AppImage
-```
-
-The resulting `MetalSlugFontReborn*.AppImage` is self-contained and runs on any distribution new enough for its bundled libraries.

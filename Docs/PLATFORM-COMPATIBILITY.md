@@ -130,4 +130,4 @@ duplicate the same list in a third place.
 Known remaining limitations: macOS launch is unverified on real hardware and
 blocked by Gatekeeper until signed; CJK input is unavailable in frozen Linux
 builds (compose IM workaround); no distribution-wide Linux packages (deb/rpm),
-the AppImage is the release artifact.
+the release artifact is the PyInstaller folder.
