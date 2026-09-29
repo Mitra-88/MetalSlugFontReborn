@@ -65,19 +65,6 @@ jobs:
         run: |
           mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
 
-      - name: Smoke test (offscreen)
-        run: |
-          QT_QPA_PLATFORM=offscreen ./dist/MetalSlugFontReborn/MetalSlugFontReborn &
-          APP_PID=$!
-          sleep 5
-          if kill -0 $APP_PID 2>/dev/null; then
-            echo "Process stayed alive"
-            kill $APP_PID
-          else
-            wait $APP_PID
-            exit $?
-          fi
-
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

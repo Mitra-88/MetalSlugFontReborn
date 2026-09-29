@@ -148,18 +148,6 @@ PLATFORM_PLUGIN_DIRS = (
     "PySide6/Qt/plugins/platforms",
 )
 
-LINUX_GRAPHICS_LIBRARIES = (
-    ("libxcb-cursor.so.0", "libxcb-cursor0"),
-    ("libxcb-xkb.so.1", "libxcb-xkb1"),
-    ("libxcb-keysyms.so.1", "libxcb-keysyms1"),
-    ("libxcb-image.so.0", "libxcb-image0"),
-    ("libxcb-render-util.so.0", "libxcb-render-util0"),
-    ("libxcb-util.so.1", "libxcb-util1"),
-    ("libxcb-shape.so.0", "libxcb-shape0"),
-    ("libxcb-icccm.so.4", "libxcb-icccm4"),
-    ("libxkbcommon-x11.so.0", "libxkbcommon-x11-0"),
-)
-
 
 def missing_plugin_message(frozen, plugin_base):
     if not frozen:
@@ -177,34 +165,6 @@ def missing_plugin_message(frozen, plugin_base):
         "The download or extraction most likely did not finish. "
         "Re-download and extract the full folder, then try again."
     )
-
-
-def linux_graphics_library_hint(probe=None):
-    if not sys.platform.startswith("linux"):
-        return None
-    import ctypes
-
-    if probe is None:
-        probe = ctypes.CDLL
-    missing = [package for soname, package in LINUX_GRAPHICS_LIBRARIES
-               if _library_unavailable(probe, soname)]
-    if not missing:
-        return None
-    install = " ".join(missing)
-    return (
-        "The graphical backend needs these system libraries, which are "
-        f"missing: {install}\n"
-        "The window may not open on X11 displays until they are installed:\n"
-        f"  sudo apt install {install}"
-    )
-
-
-def _library_unavailable(probe, soname):
-    try:
-        probe(soname)
-    except OSError:
-        return True
-    return False
 
 
 def pick_style(os_name, release, available):
@@ -1554,9 +1514,6 @@ if __name__ == "__main__":
                 None, plugin_hint, "MetalSlugFontReborn", 0x10
             )
         sys.exit(1)
-    library_hint = linux_graphics_library_hint()
-    if library_hint:
-        print(library_hint, file=sys.stderr)
 
     app = QApplication(sys.argv)
     app.setApplicationName("MetalSlugFontReborn")
