@@ -172,3 +172,10 @@ def test_native_matches_pure_across_quadrants(monkeypatch):
             monkeypatch.setattr(rs, "_NATIVE_RESOLVED", False)
             monkeypatch.setattr(rs, "_NATIVE_LIB", None)
             assert rs._load_native() is not None
+
+
+def test_non_finite_angles_are_rejected():
+    image = _gradient_sprite()
+    for angle in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="finite"):
+            rotate(image, angle, QUALITY_FAST_ROTSPRITE)

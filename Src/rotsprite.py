@@ -2,7 +2,7 @@
 import ctypes
 import os
 import sys
-from math import cos, radians, sin
+from math import cos, isfinite, radians, sin
 from pathlib import Path
 
 from PIL import Image
@@ -150,6 +150,8 @@ def _mode_downscale(flat, w, h, factor):
 def _rotate_pure_python(image, angle, quality):
     image = image.convert("RGBA")
     angle = angle % 360
+    if not isfinite(angle):
+        raise ValueError("rotation angle must be a finite number")
     if angle == 0:
         return image.copy()
     if angle % 90 == 0:
@@ -282,6 +284,8 @@ def rotate(image, angle, quality=QUALITY_FAST_ROTSPRITE):
         raise ValueError(f"unknown rotation quality: {quality!r}")
     image = image.convert("RGBA")
     angle = angle % 360
+    if not isfinite(angle):
+        raise ValueError("rotation angle must be a finite number")
     if angle == 0:
         return image.copy()
     if angle % 90 == 0:
