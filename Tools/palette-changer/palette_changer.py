@@ -118,6 +118,11 @@ class MainWindow(QMainWindow):
         self.hue_value_label = QLabel("200°")
         hue_row.addWidget(self.hue_value_label)
         root.addLayout(hue_row)
+        self._tuning_widgets = [
+            self.hue_slider,
+            self.hue_preview,
+            self.hue_value_label,
+        ]
 
         root.addWidget(_section_label("3. Adjustments (optional)"))
         self.adjustment_sliders = {}
@@ -142,6 +147,10 @@ class MainWindow(QMainWindow):
         reset_button.clicked.connect(self._reset_adjustments)
         adjust_grid.addWidget(reset_button, 0, 3, len(ADJUSTMENTS), 1)
         root.addLayout(adjust_grid)
+        for slider in self.adjustment_sliders.values():
+            self._tuning_widgets.append(slider)
+        self._tuning_widgets.append(reset_button)
+        self._set_tuning_enabled(False)
 
         root.addWidget(_section_label("4. Output folder"))
         output_row = QHBoxLayout()
@@ -212,6 +221,11 @@ class MainWindow(QMainWindow):
             if widget := item.widget():
                 widget.deleteLater()
         self.export_button.setEnabled(False)
+        self._set_tuning_enabled(False)
+
+    def _set_tuning_enabled(self, enabled):
+        for widget in self._tuning_widgets:
+            widget.setEnabled(enabled)
 
     def _load_palette(self):
         folder = self.input_entry.text().strip()
@@ -242,6 +256,7 @@ class MainWindow(QMainWindow):
         self._selected_button = None
         self._rebuild_swatches()
         self.export_button.setEnabled(True)
+        self._set_tuning_enabled(True)
         label = (
             f"{len(self._files)} sprites, {len(self._palette)} colors. "
             "Click a swatch to select it, click it again to change its hue."

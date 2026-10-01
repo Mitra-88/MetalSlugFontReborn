@@ -711,9 +711,9 @@ class MainWindow(QMainWindow):
         self._populate_font_preview_icons()
         picker_row.addWidget(self.font_select)
 
-        picker_row.addWidget(QLabel("Colour:"))
+        picker_row.addWidget(QLabel("Color:"))
         self.color_select = QComboBox()
-        self.color_select.setToolTip("Colour variant of the selected font.")
+        self.color_select.setToolTip("Color variant of the selected font.")
         picker_row.addWidget(self.color_select)
         picker_row.addStretch()
         preview_layout.addLayout(picker_row)
@@ -784,8 +784,8 @@ class MainWindow(QMainWindow):
         self.zoom_fit_btn.clicked.connect(self.fit_preview)
         status_row.addWidget(self.zoom_fit_btn)
 
-        self.zoom_native_btn = QPushButton("100%")
-        self.zoom_native_btn.setToolTip("Reset the preview to native size (100%).")
+        self.zoom_native_btn = QPushButton("1:1")
+        self.zoom_native_btn.setToolTip("Reset the preview to native size (1:1).")
         self.zoom_native_btn.clicked.connect(self._reset_zoom_native)
         status_row.addWidget(self.zoom_native_btn)
 
