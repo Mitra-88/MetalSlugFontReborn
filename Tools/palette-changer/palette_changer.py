@@ -93,7 +93,9 @@ class MainWindow(QMainWindow):
         self.palette_label = QLabel("Load a folder to see its palette.")
         root.addWidget(self.palette_label)
 
-        root.addWidget(_section_label("2. Pick a color, then change its hue"))
+        root.addWidget(
+            _section_label("2. Detected palette: drag the hue to shift every color")
+        )
         self.swatch_scroll = QScrollArea()
         self.swatch_scroll.setWidgetResizable(True)
         self.swatch_scroll.setStyleSheet("QScrollArea { border: none; }")
@@ -109,7 +111,7 @@ class MainWindow(QMainWindow):
         self.hue_slider = QSlider(Qt.Horizontal)
         self.hue_slider.setRange(0, 359)
         self.hue_slider.setValue(200)
-        self.hue_slider.valueChanged.connect(self._update_hue_preview)
+        self.hue_slider.valueChanged.connect(self._on_hue_changed)
         hue_row.addWidget(self.hue_slider, 1)
         self.hue_preview = QLabel()
         self.hue_preview.setFixedSize(22, 22)
@@ -175,6 +177,12 @@ class MainWindow(QMainWindow):
         root.addLayout(export_row)
 
         self._update_hue_preview(self.hue_slider.value())
+
+    def _on_hue_changed(self, hue):
+        for rgb in self._mappings:
+            self._mappings[rgb] = hue_shift(rgb, hue)
+        self._refresh_previews()
+        self._update_hue_preview(hue)
 
     def _update_hue_preview(self, hue):
         self.hue_preview.setStyleSheet(
@@ -255,6 +263,9 @@ class MainWindow(QMainWindow):
         self._selected_rgb = None
         self._selected_button = None
         self._rebuild_swatches()
+        for rgb in self._palette:
+            self._mappings[rgb] = hue_shift(rgb, self.hue_slider.value())
+        self._refresh_previews()
         self.export_button.setEnabled(True)
         self._set_tuning_enabled(True)
         label = (

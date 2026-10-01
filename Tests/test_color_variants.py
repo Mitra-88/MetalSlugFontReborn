@@ -269,3 +269,24 @@ def test_swatch_preview_shows_adjusted_color(qapp, tmp_path):
         assert f"background-color: {fill}" in blue_shade_button.styleSheet()
     finally:
         window.close()
+
+
+def test_hue_slider_drives_whole_detected_palette(qapp, tmp_path):
+    from color_variants import hue_shift
+    from palette_changer import MainWindow
+
+    _files, input_dir = make_files(tmp_path)
+    window = MainWindow()
+    try:
+        window.input_entry.setText(str(input_dir))
+        window._load_palette()
+        palette = list(window._mappings.keys())
+        assert len(palette) >= 2
+        window.hue_slider.setValue(90)
+        for rgb in palette:
+            assert window._mappings[rgb] == hue_shift(rgb, 90)
+        window.hue_slider.setValue(45)
+        for rgb in palette:
+            assert window._mappings[rgb] == hue_shift(rgb, 45)
+    finally:
+        window.close()
