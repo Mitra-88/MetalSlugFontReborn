@@ -767,3 +767,75 @@ def test_scene_rect_tracks_nudged_items(qapp, tmp_path):
     finally:
         dialog._dirty = False
         dialog.close()
+
+
+def test_align_and_spread_keep_integer_positions(qapp, tmp_path):
+
+    dialog = make_dialog(tmp_path)
+    try:
+        a, b = dialog.items[0], dialog.items[1]
+        b.scale_pct = 50
+        b.update_pixmap()
+        a.setSelected(True)
+        b.setSelected(True)
+        for mode in ("left", "center", "right", "top", "middle", "bottom"):
+            dialog._align_selection(mode)
+            for item in (a, b):
+                assert item.pos().x() == int(item.pos().x()), (mode, item.pos())
+                assert item.pos().y() == int(item.pos().y()), (mode, item.pos())
+        dialog._distribute_selection("x")
+        dialog._distribute_selection("y")
+        for item in (a, b):
+            assert item.pos().x() == int(item.pos().x())
+            assert item.pos().y() == int(item.pos().y())
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_undo_blocked_during_slider_gesture(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        dialog._begin_slider_undo()
+        dialog.scale_slider.setValue(250)
+        dialog._undo()
+        assert item.scale_pct == 250
+        dialog._end_slider_undo()
+        assert item.scale_pct == 250
+        dialog._undo()
+        assert item.scale_pct == 100
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_zoom_below_minimum_moves_continuously(qapp, tmp_path):
+    from PySide6.QtGui import QTransform
+
+    dialog = make_dialog(tmp_path)
+    try:
+        view = dialog.view
+        view.setTransform(QTransform().scale(0.04, 0.04))
+        view.zoom_by(1.15)
+        assert abs(view.transform().m11() - 0.046) < 1e-9
+        for _ in range(20):
+            view.zoom_by(1.15)
+            if view.transform().m11() >= 0.1:
+                break
+        assert view.transform().m11() == 0.1
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_icon_only_buttons_have_accessible_names(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        assert dialog.zoom_in_btn.accessibleName() == "Zoom in"
+        assert dialog.zoom_out_btn.accessibleName() == "Zoom out"
+        assert dialog.help_btn.accessibleName() == "Editor help"
+    finally:
+        dialog._dirty = False
+        dialog.close()

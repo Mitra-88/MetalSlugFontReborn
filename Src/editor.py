@@ -1126,7 +1126,13 @@ class EditorView(QGraphicsView):
 
     def zoom_by(self, factor):
         current = self.transform().m11()
-        target = max(ZOOM_MIN_FACTOR, min(ZOOM_MAX_FACTOR, current * factor))
+        target = current * factor
+        if current < ZOOM_MIN_FACTOR:
+            target = min(target, ZOOM_MIN_FACTOR)
+        elif current > ZOOM_MAX_FACTOR:
+            target = max(target, ZOOM_MAX_FACTOR)
+        else:
+            target = max(ZOOM_MIN_FACTOR, min(ZOOM_MAX_FACTOR, target))
         if abs(target - current) < 1e-9:
             return
         self.setTransform(self.transform().scale(target / current, target / current))
@@ -1387,12 +1393,14 @@ class AdvancedEditorDialog(QDialog):
 
         self.zoom_out_btn = QPushButton("−")
         self.zoom_out_btn.setFixedWidth(28)
+        self.zoom_out_btn.setAccessibleName("Zoom out")
         self.zoom_out_btn.setToolTip("Zoom out (also: mouse wheel down, Ctrl+-).")
         self.zoom_out_btn.clicked.connect(lambda: self.view.zoom_by(1 / ZOOM_STEP))
         layout.addWidget(self.zoom_out_btn)
 
         self.zoom_in_btn = QPushButton("+")
         self.zoom_in_btn.setFixedWidth(28)
+        self.zoom_in_btn.setAccessibleName("Zoom in")
         self.zoom_in_btn.setToolTip("Zoom in (also: mouse wheel up, Ctrl+=).")
         self.zoom_in_btn.clicked.connect(lambda: self.view.zoom_by(ZOOM_STEP))
         layout.addWidget(self.zoom_in_btn)
@@ -1404,6 +1412,7 @@ class AdvancedEditorDialog(QDialog):
 
         self.help_btn = QPushButton("?")
         self.help_btn.setFixedWidth(28)
+        self.help_btn.setAccessibleName("Editor help")
         self.help_btn.setToolTip("How the editor works: mouse actions, keys, snapping.")
         self.help_btn.clicked.connect(self._show_help)
         layout.addWidget(self.help_btn)
@@ -1889,7 +1898,7 @@ Panels
             self._delete_items(selected)
 
     def _undo(self):
-        if self._in_canvas_gesture():
+        if self._in_canvas_gesture() or self._in_slider_gesture():
             return
         if not self.undo_stack.undo(self._apply_all):
             return
@@ -1899,7 +1908,7 @@ Panels
         self._update_scene_rect()
 
     def _redo(self):
-        if self._in_canvas_gesture():
+        if self._in_canvas_gesture() or self._in_slider_gesture():
             return
         if not self.undo_stack.redo(self._apply_all):
             return
@@ -2183,8 +2192,7 @@ Panels
             union = union.united(rect)
         for item, rect in rects.items():
             if mode == "left":
-                delta = union.left() - rect.left()
-                ddx, ddy = delta, 0
+                ddx, ddy = union.left() - rect.left(), 0
             elif mode == "right":
                 ddx, ddy = union.right() - rect.right(), 0
             elif mode == "center":
@@ -2195,6 +2203,7 @@ Panels
                 ddx, ddy = 0, union.bottom() - rect.bottom()
             else:
                 ddx, ddy = 0, union.center().y() - rect.center().y()
+            ddx, ddy = round(ddx), round(ddy)
             if ddx or ddy:
                 item.dx += ddx
                 item.dy += ddy
@@ -2221,11 +2230,11 @@ Panels
         for index, item in enumerate(ordered[1:-1], start=1):
             rect = rects[item]
             if axis == "x":
-                delta = first.x() + index * step - rect.center().x()
+                delta = round(first.x() + index * step - rect.center().x())
                 if delta:
                     item.dx += delta
             else:
-                delta = first.y() + index * step - rect.center().y()
+                delta = round(first.y() + index * step - rect.center().y())
                 if delta:
                     item.dy += delta
             item._place()
