@@ -147,3 +147,21 @@ def test_set_theme_tolerates_wrong_typed_stored_value(qapp, tmp_path, monkeypatc
     ui_common.config.set("theme", {"not": "a string"})
     set_theme()
     assert QApplication.palette() is not None
+
+
+def test_config_normalizes_boolean_values(tmp_path):
+    from ui_common import Config
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        'skip_location_prompt = "yes"\n'
+        'skip_char_replace_confirm = "no"\n'
+        'skip_theme_prompt = 1\n'
+        'theme = "Dark"\n',
+        encoding="utf-8",
+    )
+    cfg = Config(path)
+    assert cfg.get("skip_location_prompt") is True
+    assert cfg.get("skip_char_replace_confirm") is False
+    assert cfg.get("skip_theme_prompt") is True
+    assert cfg.get("theme") == "Dark"

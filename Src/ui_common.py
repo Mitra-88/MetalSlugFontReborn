@@ -70,6 +70,19 @@ class Config:
             self._doc = tomlkit.loads(self._path.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError, TOMLKitError):
             pass
+        for key in (
+            "skip_location_prompt",
+            "skip_char_replace_confirm",
+            "skip_theme_prompt",
+        ):
+            value = self._doc.get(key)
+            if value is not None and not isinstance(value, bool):
+                self._doc[key] = str(value).strip().lower() not in (
+                    "",
+                    "0",
+                    "false",
+                    "no",
+                )
 
     def get(self, key: str, fallback=None):
         return self._doc.get(key, fallback)
