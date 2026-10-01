@@ -1026,6 +1026,7 @@ class EditorScene(QGraphicsScene):
                 pen.setCosmetic(True)
                 pen.setWidthF(1)
             center.setDashPattern([4, 4])
+            spacing.setDashPattern([1, 3])
             self._guide_pens = {
                 GuideStyle.EDGE: edge,
                 GuideStyle.CENTER: center,
