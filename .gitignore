@@ -175,4 +175,4 @@ config.toml
 Src/build_commit.txt
 
 # ZCode
-.zcode/
+.zcode/.zcodeignore
