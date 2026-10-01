@@ -104,6 +104,8 @@ pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn"
 mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
 rm -rf dist/MetalSlugFontReborn/_internal/PySide6/translations dist/MetalSlugFontReborn/_internal/PySide6/plugins/tls dist/MetalSlugFontReborn/_internal/PySide6/plugins/networkinformation dist/MetalSlugFontReborn/_internal/PySide6/plugins/generic dist/MetalSlugFontReborn/_internal/PySide6/plugins/iconengines dist/MetalSlugFontReborn/_internal/setuptools
 rm -f dist/MetalSlugFontReborn/_internal/PySide6/Qt6Network* dist/MetalSlugFontReborn/_internal/PySide6/Qt6Svg* dist/MetalSlugFontReborn/_internal/libcrypto* dist/MetalSlugFontReborn/_internal/libssl*
+rm -rf dist/MetalSlugFontReborn/_internal/PySide6/Qt/translations dist/MetalSlugFontReborn/_internal/PySide6/Qt/plugins/tls dist/MetalSlugFontReborn/_internal/PySide6/Qt/plugins/networkinformation dist/MetalSlugFontReborn/_internal/PySide6/Qt/plugins/generic dist/MetalSlugFontReborn/_internal/PySide6/Qt/plugins/iconengines
+rm -f dist/MetalSlugFontReborn/_internal/PySide6/Qt/lib/libQt6Network* dist/MetalSlugFontReborn/_internal/PySide6/Qt/lib/libQt6Svg* dist/MetalSlugFontReborn/_internal/PySide6/Qt/lib/libcrypto* dist/MetalSlugFontReborn/_internal/PySide6/Qt/lib/libssl*
 ```
 
 On macOS the rotation library is named `libmsfr_rotsprite.dylib`, so use that file name in the `--add-binary` flag.
