@@ -22,7 +22,7 @@ Tests: `.venv/Scripts/python.exe -m pytest` (headless via the offscreen QPA, no 
 
 Generation pipeline (`Src/main.py`):
 
-1. `MainWindow` collects params: text, font id, color, compress level, scale, save dir (first run asks, defaults to the Desktop, remembered via `skip_location_prompt`).
+1. `MainWindow` collects params: text, font id, color, compress level, scale, save dir (asked before the first generation, defaults to the Desktop, remembered via `skip_location_prompt`).
 2. It emits `trigger_generation(params)`; `ImageWorker.process` runs on a low-priority `QThread` so the UI never blocks.
 3. The worker calls `image_generation.generate_image`, which composites sprites and saves a PNG named by uuid.
 4. The worker emits `finished(path, w, h, start)` or `failed(message)`; `MainWindow` shows a summary box with file size and elapsed time, or an error box.

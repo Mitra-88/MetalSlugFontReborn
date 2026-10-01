@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from PySide6.QtWidgets import QApplication
 
 from image_generation import get_font_charset, get_font_ids
@@ -313,3 +315,50 @@ def test_close_with_follower_disconnects_cleanly(qapp, tmp_path, monkeypatch, ca
     assert "Failed to disconnect" not in capsys.readouterr().err
     QApplication.styleHints().colorSchemeChanged.emit(Qt.ColorScheme.Dark)
     assert QApplication.palette() == ui_common.light_mode()
+
+
+def test_save_prompt_moves_to_first_generation(qapp, tmp_path, monkeypatch):
+    import ui_common
+    from ui_common import Config
+
+    monkeypatch.setattr("main.ImageWorker.process", lambda self, params: None)
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("skip_location_prompt = true\n", encoding="utf-8")
+    monkeypatch.setattr(ui_common, "config", Config(config_path))
+
+    window = MainWindow()
+    try:
+        window.text_input.setPlainText("Hi")
+        asked = []
+        monkeypatch.setattr(window, "_ask_save_location", lambda: asked.append(1) or (False, False))
+        window.generate_image()
+        assert asked == []
+    finally:
+        window.close()
+
+    config_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(ui_common, "config", Config(config_path))
+    window = MainWindow()
+    try:
+        window.text_input.setPlainText("Hi")
+        asked = []
+        monkeypatch.setattr(window, "_ask_save_location", lambda: asked.append(1) or (False, False))
+        window.generate_image()
+        assert asked == [1]
+    finally:
+        window.close()
+
+
+def test_default_marker_ignores_path_casing(qapp, tmp_path, monkeypatch):
+    import ui_common
+    from ui_common import Config
+
+    monkeypatch.setattr("main.load_config", lambda *args, **kwargs: True)
+    monkeypatch.setattr(ui_common, "config", Config(tmp_path / "config.toml"))
+    window = MainWindow()
+    try:
+        window.save_path = Path(str(window.default_save_path).upper())
+        window.update_save_location_display()
+        assert "(default)" in window.save_location_label.text()
+    finally:
+        window.close()

@@ -91,7 +91,6 @@ DEFAULT_COMPRESS_LEVEL = 6
 PREVIEW_COMPRESS_LEVEL = 0
 DISABLE_COMPRESSION = 0
 
-INITIAL_PROMPT_DELAY = 100
 PREVIEW_LABEL_MARGIN = 6
 
 MAIN_LAYOUT_SPACING = 18
@@ -480,7 +479,6 @@ class MainWindow(QMainWindow):
             )
             self._theme_follower_connected = True
 
-        QTimer.singleShot(INITIAL_PROMPT_DELAY, self.prompt_save_location)
 
     def _on_system_theme_changed(self, _scheme):
         saved = load_config("theme")
@@ -1146,7 +1144,7 @@ class MainWindow(QMainWindow):
     def update_save_location_display(self):
         folder_name = self.save_path.name
         display_text = f"Save location: {folder_name}"
-        if self.save_path == self.default_save_path:
+        if str(self.save_path).casefold() == str(self.default_save_path).casefold():
             display_text += " (default)"
 
         self.save_location_label.setText(display_text)
@@ -1156,7 +1154,13 @@ class MainWindow(QMainWindow):
     def prompt_save_location(self):
         if self._closed or load_config("skip_location_prompt", fallback=False):
             return
+        choose, remember = self._ask_save_location()
+        if remember:
+            save_config("skip_location_prompt", True)
+        if choose:
+            self.select_save_path()
 
+    def _ask_save_location(self):
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Welcome to MetalSlugFontReborn!")
         msg_box.setText(
@@ -1170,12 +1174,7 @@ class MainWindow(QMainWindow):
         msg_box.setCheckBox(cb)
 
         reply = msg_box.exec()
-
-        if cb.isChecked():
-            save_config("skip_location_prompt", True)
-
-        if reply == QMessageBox.Yes:
-            self.select_save_path()
+        return reply == QMessageBox.Yes, cb.isChecked()
 
     def create_menubar(self):
         menubar = self.menuBar()
@@ -1343,6 +1342,7 @@ class MainWindow(QMainWindow):
     def generate_image(self):
         if self._generating:
             return
+        self.prompt_save_location()
         params = self._collect_params()
         self._last_skipped = params.get("skipped", [])
         if not params.get("text", ""):
