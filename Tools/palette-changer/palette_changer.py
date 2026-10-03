@@ -1,10 +1,10 @@
-
 import colorsys
 import sys
 from pathlib import Path
 
 from color_variants import (
     MAX_PALETTE_COLORS,
+    NEUTRAL_SATURATION,
     adjust_color,
     collect_palette,
     export_recolored,
@@ -111,7 +111,7 @@ class MainWindow(QMainWindow):
         hue_row = QHBoxLayout()
         hue_row.addWidget(QLabel("Hue"))
         self.hue_slider = QSlider(Qt.Horizontal)
-        self.hue_slider.setRange(0, 359)
+        self.hue_slider.setRange(0, 360)
         self.hue_slider.setValue(200)
         self.hue_slider.valueChanged.connect(self._on_hue_changed)
         hue_row.addWidget(self.hue_slider, 1)
@@ -180,15 +180,18 @@ class MainWindow(QMainWindow):
 
         self._update_hue_preview(self.hue_slider.value())
 
-    def _on_hue_changed(self, hue):
-        if self._base_hue is None:
-            delta = hue
-        else:
-            delta = (hue - self._base_hue) % 360
+    def _on_hue_changed(self, value):
         for rgb in self._mappings:
-            self._mappings[rgb] = hue_shift(rgb, delta)
+            self._mappings[rgb] = self._rotate_hue(rgb, value)
         self._refresh_previews()
-        self._update_hue_preview(hue)
+        self._update_hue_preview(value)
+
+    @staticmethod
+    def _rotate_hue(rgb, degrees):
+        hue, _sat, _val = colorsys.rgb_to_hsv(
+            rgb[0] / 255, rgb[1] / 255, rgb[2] / 255
+        )
+        return hue_shift(rgb, round((hue * 360 + degrees) % 360))
 
     def _detect_base_hue(self):
         for rgb in self._palette:
@@ -199,12 +202,16 @@ class MainWindow(QMainWindow):
                 return round(hue * 360)
         return None
 
-    def _update_hue_preview(self, hue):
+    def _update_hue_preview(self, value):
+        if self._base_hue is None:
+            hue = value
+        else:
+            hue = (self._base_hue + value) % 360
         self.hue_preview.setStyleSheet(
             f"background-color: {QColor.fromHsv(hue, 255, 255).name()};"
             f"border: 1px solid rgba(0, 0, 0, 60); border-radius: 4px;"
         )
-        self.hue_value_label.setText(f"{hue}°")
+        self.hue_value_label.setText(f"{value}°")
 
     def _update_adjustment_label(self, key):
         self.adjustment_labels[key].setText(f"{self.adjustment_sliders[key].value()}%")
@@ -281,8 +288,7 @@ class MainWindow(QMainWindow):
         self._rebuild_swatches()
         self._base_hue = self._detect_base_hue()
         self.hue_slider.blockSignals(True)
-        if self._base_hue is not None:
-            self.hue_slider.setValue(self._base_hue)
+        self.hue_slider.setValue(0)
         self.hue_slider.blockSignals(False)
         for rgb in self._palette:
             self._mappings[rgb] = rgb
@@ -359,7 +365,7 @@ class MainWindow(QMainWindow):
         delta = self.hue_slider.value()
         if self._base_hue is not None:
             delta = (self.hue_slider.value() - self._base_hue) % 360
-        self._mappings[rgb] = hue_shift(rgb, delta)
+        self._mappings[rgb] = self._rotate_hue(rgb, self.hue_slider.value())
         self._refresh_previews()
         if button is not None:
             button.setChecked(True)

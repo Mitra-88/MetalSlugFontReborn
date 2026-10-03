@@ -99,7 +99,7 @@ MetalSlugFontReborn is a free, open-source desktop app built with PySide6 and Pi
 - **RAM Usage:** ~35-110MB (varies with OS)
 - **Disk Space:** ~120-290MB (varies with OS)
 
-> If your system doesn't meet these requirements, try the [web app](https://vermeil.pythonanywhere.com/) it runs in any modern browser.
+> If your system doesn't meet these requirements, try the [web app](https://metalslugfontrebornsolid2.mitra88dev.workers.dev/) it runs in any modern browser.
 
 ## Installing MetalSlugFontReborn
 

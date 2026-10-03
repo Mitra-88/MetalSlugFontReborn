@@ -262,8 +262,10 @@ def test_swatch_preview_shows_adjusted_color(qapp, tmp_path):
         window.hue_slider.setValue(120)
         blue_shade_button.click()
         blue_shade_button.click()
-        delta = (120 - window._base_hue) % 360
-        mapped = hue_shift((176, 184, 224), delta)
+        base_hue = round(
+            colorsys.rgb_to_hsv(176 / 255, 184 / 255, 224 / 255)[0] * 360
+        )
+        mapped = hue_shift((176, 184, 224), (base_hue + 120) % 360)
         window.adjustment_sliders["brightness"].setValue(50)
         shown = adjust_color(mapped, 0.5, 1.0, 1.0)
         fill = "#{:02x}{:02x}{:02x}".format(*shown)
@@ -284,15 +286,15 @@ def test_hue_slider_drives_whole_detected_palette(qapp, tmp_path):
         palette = list(window._mappings.keys())
         assert len(palette) >= 2
         assert window._base_hue is not None
-        assert window.hue_slider.value() == window._base_hue
+        assert window.hue_slider.value() == 0
         assert all(window._mappings[rgb] == rgb for rgb in palette)
         window.hue_slider.setValue(90)
-        delta = (90 - window._base_hue) % 360
         for rgb in palette:
-            assert window._mappings[rgb] == hue_shift(rgb, delta)
-        window.hue_slider.setValue(45)
-        delta = (45 - window._base_hue) % 360
-        for rgb in palette:
-            assert window._mappings[rgb] == hue_shift(rgb, delta)
+            hue = round(
+                colorsys.rgb_to_hsv(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)[0] * 360
+            )
+            assert window._mappings[rgb] == hue_shift(rgb, (hue + 90) % 360)
+        window.hue_slider.setValue(360)
+        assert all(window._mappings[rgb] == rgb for rgb in palette)
     finally:
         window.close()
