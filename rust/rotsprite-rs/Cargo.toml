@@ -1,7 +1,7 @@
 [package]
 name = "msfr_rotsprite"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "msfr_rotsprite"
@@ -9,4 +9,12 @@ crate-type = ["cdylib"]
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+incremental = false
+debug = false
+debug-assertions = false
+overflow-checks = false
+rpath = false

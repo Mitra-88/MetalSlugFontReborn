@@ -1,4 +1,5 @@
 
+import colorsys
 import sys
 from pathlib import Path
 
@@ -67,6 +68,7 @@ class MainWindow(QMainWindow):
         self._swatch_buttons = {}
         self._selected_rgb = None
         self._selected_button = None
+        self._base_hue = None
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -179,10 +181,23 @@ class MainWindow(QMainWindow):
         self._update_hue_preview(self.hue_slider.value())
 
     def _on_hue_changed(self, hue):
+        if self._base_hue is None:
+            delta = hue
+        else:
+            delta = (hue - self._base_hue) % 360
         for rgb in self._mappings:
-            self._mappings[rgb] = hue_shift(rgb, hue)
+            self._mappings[rgb] = hue_shift(rgb, delta)
         self._refresh_previews()
         self._update_hue_preview(hue)
+
+    def _detect_base_hue(self):
+        for rgb in self._palette:
+            hue, sat, val = colorsys.rgb_to_hsv(
+                rgb[0] / 255, rgb[1] / 255, rgb[2] / 255
+            )
+            if sat >= 0.15 and val >= 0.15:
+                return round(hue * 360)
+        return None
 
     def _update_hue_preview(self, hue):
         self.hue_preview.setStyleSheet(
@@ -229,6 +244,7 @@ class MainWindow(QMainWindow):
             if widget := item.widget():
                 widget.deleteLater()
         self.export_button.setEnabled(False)
+        self._base_hue = None
         self._set_tuning_enabled(False)
 
     def _set_tuning_enabled(self, enabled):
@@ -263,8 +279,13 @@ class MainWindow(QMainWindow):
         self._selected_rgb = None
         self._selected_button = None
         self._rebuild_swatches()
+        self._base_hue = self._detect_base_hue()
+        self.hue_slider.blockSignals(True)
+        if self._base_hue is not None:
+            self.hue_slider.setValue(self._base_hue)
+        self.hue_slider.blockSignals(False)
         for rgb in self._palette:
-            self._mappings[rgb] = hue_shift(rgb, self.hue_slider.value())
+            self._mappings[rgb] = rgb
         self._refresh_previews()
         self.export_button.setEnabled(True)
         self._set_tuning_enabled(True)
@@ -335,7 +356,10 @@ class MainWindow(QMainWindow):
         self._add_mapping(rgb, button)
 
     def _add_mapping(self, rgb, button):
-        self._mappings[rgb] = hue_shift(rgb, self.hue_slider.value())
+        delta = self.hue_slider.value()
+        if self._base_hue is not None:
+            delta = (self.hue_slider.value() - self._base_hue) % 360
+        self._mappings[rgb] = hue_shift(rgb, delta)
         self._refresh_previews()
         if button is not None:
             button.setChecked(True)
