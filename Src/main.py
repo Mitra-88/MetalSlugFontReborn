@@ -1072,7 +1072,8 @@ class MainWindow(QMainWindow):
 
     def _clean_text(self):
         font = int(self.font_select.currentText())
-        text = normalize_text(font, self.text_input.toPlainText().strip())
+        text = self.text_input.toPlainText().replace("\r\n", "\n").replace("\r", "\n")
+        text = normalize_text(font, text.strip())
         skipped = find_unsupported_characters(text, font)
         if skipped:
             text = "".join(ch for ch in text if ch not in set(skipped))

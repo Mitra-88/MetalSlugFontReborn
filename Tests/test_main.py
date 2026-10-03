@@ -362,3 +362,24 @@ def test_default_marker_ignores_path_casing(qapp, tmp_path, monkeypatch):
         assert "(default)" in window.save_location_label.text()
     finally:
         window.close()
+
+
+def test_clean_text_normalizes_carriage_returns(qapp, tmp_path, monkeypatch):
+    import ui_common
+    from ui_common import Config
+
+    monkeypatch.setattr("main.load_config", lambda *args, **kwargs: True)
+    monkeypatch.setattr(ui_common, "config", Config(tmp_path / "config.toml"))
+    window = MainWindow()
+    try:
+        monkeypatch.setattr(
+            window.text_input,
+            "toPlainText",
+            lambda: "HI\r\nYO\rK",
+        )
+        font, text, skipped = window._clean_text()
+        assert font == 1
+        assert skipped == []
+        assert text == "HI\nYO\nK"
+    finally:
+        window.close()
