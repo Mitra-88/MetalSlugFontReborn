@@ -261,7 +261,7 @@ pub fn rotate(
     (pixels, cw, ch)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 // Safety: caller must keep `src` readable for `src_len` bytes and `out`
 // writable for `out_cap` bytes, with all output pointers non-null, for the
 // duration of the call.
