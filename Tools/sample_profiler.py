@@ -17,10 +17,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Src"))
 
-from image_generation import generate_image, get_font_paths
+from image_generation import generate_image, get_font_charset, get_font_paths
 
-SHORT_TEXT = "Hello World!"
-LONG_TEXT = "METAL SLUG IS PEAK! " * 100
+BENCH_TEXT = "".join(sorted(get_font_charset(1)))
+LONG_TEXT = BENCH_TEXT * 20
 FONT_PATHS = get_font_paths(1, "Blue")
 
 
@@ -109,8 +109,12 @@ def leak_check():
 
 
 if __name__ == "__main__":
-    render(SHORT_TEXT, runs=2)
-    profile_hot_spots(SHORT_TEXT, "typical text, warm cache")
-    profile_hot_spots(LONG_TEXT, "2000 chars")
-    profile_memory(LONG_TEXT, "2000 chars")
+    print(
+        f"benchmark text: {len(BENCH_TEXT)} supported font 1 characters, "
+        f"long variant {len(LONG_TEXT)} chars"
+    )
+    render(BENCH_TEXT, runs=2)
+    profile_hot_spots(BENCH_TEXT, "all supported characters, warm cache")
+    profile_hot_spots(LONG_TEXT, "every supported character, repeated")
+    profile_memory(LONG_TEXT, "every supported character, repeated")
     leak_check()
