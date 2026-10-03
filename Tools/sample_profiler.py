@@ -10,6 +10,7 @@ after any performance change.
 
 import cProfile
 import io
+import platform
 import pstats
 import sys
 import tracemalloc
@@ -55,7 +56,7 @@ def profile_memory(text, label):
 
 
 def process_memory_mb():
-    if sys.platform != "win32":
+    if platform.system() != "Windows":
         return None
     import ctypes
     import ctypes.wintypes as wt
