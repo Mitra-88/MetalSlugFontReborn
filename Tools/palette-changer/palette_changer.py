@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -41,12 +42,6 @@ ADJUSTMENTS = (
     ("Saturation", "saturation"),
     ("Contrast", "contrast"),
 )
-
-
-def _section_label(text):
-    label = QLabel(text)
-    label.setStyleSheet("font-weight: bold;")
-    return label
 
 
 def _percent_slider():
@@ -79,7 +74,8 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(MARGIN, MARGIN, MARGIN, MARGIN)
         root.setSpacing(SPACING)
 
-        root.addWidget(_section_label("1. Input folder"))
+        input_group = QGroupBox("1. Choose the sprites to recolor")
+        input_layout = QVBoxLayout(input_group)
         input_row = QHBoxLayout()
         self.input_entry = QLineEdit()
         self.input_entry.setPlaceholderText(
@@ -87,20 +83,22 @@ class MainWindow(QMainWindow):
         )
         self.input_entry.returnPressed.connect(self._load_palette)
         browse_input = QPushButton("Browse...")
+        browse_input.setToolTip("Pick the folder that holds the sprites")
         browse_input.clicked.connect(self._browse_input)
         self.load_button = QPushButton("Load Palette")
+        self.load_button.setToolTip("Detect the colors these sprites use")
         self.load_button.clicked.connect(self._load_palette)
         input_row.addWidget(self.input_entry, 1)
         input_row.addWidget(browse_input)
         input_row.addWidget(self.load_button)
-        root.addLayout(input_row)
+        input_layout.addLayout(input_row)
 
         self.palette_label = QLabel("Load a folder to see its palette.")
-        root.addWidget(self.palette_label)
+        input_layout.addWidget(self.palette_label)
+        root.addWidget(input_group)
 
-        root.addWidget(
-            _section_label("2. Detected palette: drag the hue to shift every color")
-        )
+        palette_group = QGroupBox("2. Detected palette")
+        palette_layout = QVBoxLayout(palette_group)
         self.swatch_scroll = QScrollArea()
         self.swatch_scroll.setWidgetResizable(True)
         self.swatch_scroll.setStyleSheet("QScrollArea { border: none; }")
@@ -109,32 +107,38 @@ class MainWindow(QMainWindow):
         self.swatch_grid.setSpacing(6)
         self.swatch_scroll.setWidget(self.swatch_container)
         self.swatch_scroll.setMinimumHeight(96)
-        root.addWidget(self.swatch_scroll, 1)
+        palette_layout.addWidget(self.swatch_scroll, 1)
 
         hue_row = QHBoxLayout()
-        hue_row.addWidget(QLabel("Hue"))
+        hue_label = QLabel("Hue shift")
+        hue_row.addWidget(hue_label)
         self.hue_slider = QSlider(Qt.Horizontal)
         self.hue_slider.setRange(0, 360)
-        self.hue_slider.setValue(200)
+        self.hue_slider.setValue(0)
+        self.hue_slider.setToolTip(
+            "Rotate every detected color around the color wheel. "
+            "0 leaves the palette unchanged."
+        )
         self.hue_slider.valueChanged.connect(self._on_hue_changed)
         hue_row.addWidget(self.hue_slider, 1)
         self.hue_preview = QLabel()
         self.hue_preview.setFixedSize(22, 22)
-        self.hue_preview.setToolTip("Preview of the replacement hue")
+        self.hue_preview.setToolTip("The color family the palette is shifted to")
         hue_row.addWidget(self.hue_preview)
-        self.hue_value_label = QLabel("200°")
+        self.hue_value_label = QLabel("0°")
         hue_row.addWidget(self.hue_value_label)
-        root.addLayout(hue_row)
+        palette_layout.addLayout(hue_row)
+        root.addWidget(palette_group, 1)
         self._tuning_widgets = [
             self.hue_slider,
             self.hue_preview,
             self.hue_value_label,
         ]
 
-        root.addWidget(_section_label("3. Adjustments (optional)"))
+        adjust_group = QGroupBox("3. Fine tuning (optional)")
         self.adjustment_sliders = {}
         self.adjustment_labels = {}
-        adjust_grid = QGridLayout()
+        adjust_grid = QGridLayout(adjust_group)
         adjust_grid.setHorizontalSpacing(SPACING)
         for row, (name, key) in enumerate(ADJUSTMENTS):
             adjust_grid.addWidget(QLabel(name), row, 0)
@@ -151,35 +155,42 @@ class MainWindow(QMainWindow):
             adjust_grid.addWidget(percent, row, 2)
         self.adjustment_sliders["brightness"].setValue(100)
         reset_button = QPushButton("Reset")
+        reset_button.setToolTip("Brightness, saturation and contrast back to 100%")
         reset_button.clicked.connect(self._reset_adjustments)
         adjust_grid.addWidget(reset_button, 0, 3, len(ADJUSTMENTS), 1)
-        root.addLayout(adjust_grid)
+        root.addWidget(adjust_group)
         for slider in self.adjustment_sliders.values():
             self._tuning_widgets.append(slider)
         self._tuning_widgets.append(reset_button)
         self._set_tuning_enabled(False)
 
-        root.addWidget(_section_label("4. Output folder"))
+        export_group = QGroupBox("4. Export")
+        export_layout = QVBoxLayout(export_group)
         output_row = QHBoxLayout()
         self.output_entry = QLineEdit()
         self.output_entry.setPlaceholderText(
             "Name (created next to the input folder) or full path"
         )
         browse_output = QPushButton("Browse...")
+        browse_output.setToolTip("Pick where the recolored copies are written")
         browse_output.clicked.connect(self._browse_output)
         output_row.addWidget(self.output_entry, 1)
         output_row.addWidget(browse_output)
-        root.addLayout(output_row)
+        export_layout.addLayout(output_row)
 
         export_row = QHBoxLayout()
         self.export_button = QPushButton("Export Recolored Copies")
         self.export_button.setEnabled(False)
+        self.export_button.setToolTip(
+            "Write a recolored copy of every sprite into the output folder"
+        )
         self.export_button.clicked.connect(self._export)
         self.output_entry.returnPressed.connect(self._export)
         export_row.addWidget(self.export_button)
         self.status_label = QLabel()
         export_row.addWidget(self.status_label, 1)
-        root.addLayout(export_row)
+        export_layout.addLayout(export_row)
+        root.addWidget(export_group)
 
         self._update_hue_preview(self.hue_slider.value())
 
@@ -299,8 +310,8 @@ class MainWindow(QMainWindow):
         self.export_button.setEnabled(True)
         self._set_tuning_enabled(True)
         label = (
-            f"{len(self._files)} sprites, {len(self._palette)} colors. "
-            "Click a swatch to select it, click it again to change its hue."
+            f"{len(self._files)} sprites, {len(self._palette)} colors detected. "
+            "Drag the hue slider to shift every color at once."
         )
         if len(self._palette) >= MAX_PALETTE_COLORS:
             label += f" Showing the {MAX_PALETTE_COLORS} most-used colors."
