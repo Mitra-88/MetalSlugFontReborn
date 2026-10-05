@@ -1,4 +1,5 @@
 import colorsys
+import platform
 import sys
 from pathlib import Path
 
@@ -424,7 +425,7 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    if sys.platform == "win32":
+    if platform.system() == "Windows":
         import ctypes
 
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(

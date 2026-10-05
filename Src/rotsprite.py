@@ -1,6 +1,7 @@
 
 import ctypes
 import os
+import platform
 import sys
 from math import cos, isfinite, radians, sin
 from pathlib import Path
@@ -193,9 +194,9 @@ _NATIVE_RESOLVED = False
 
 def _library_candidates():
     here = Path(__file__).resolve().parent
-    if sys.platform == "win32":
+    if platform.system() == "Windows":
         names = ["msfr_rotsprite.dll"]
-    elif sys.platform == "darwin":
+    elif platform.system() == "Darwin":
         names = ["libmsfr_rotsprite.dylib"]
     else:
         names = ["libmsfr_rotsprite.so"]

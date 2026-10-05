@@ -1499,13 +1499,13 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
-    if sys.platform == "win32":
+    if platform.system() == "Windows":
         import ctypes
 
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
             "Mitra88.MetalSlugFontReborn"
         )
-    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+    if getattr(sys, "frozen", False) and platform.system() == "Linux":
         environ.setdefault("QT_IM_MODULE", "compose")
         environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
@@ -1515,7 +1515,7 @@ if __name__ == "__main__":
     )
     if plugin_hint:
         print(plugin_hint, file=sys.stderr)
-        if sys.platform == "win32":
+        if platform.system() == "Windows":
             import ctypes
 
             ctypes.windll.user32.MessageBoxW(
@@ -1527,7 +1527,7 @@ if __name__ == "__main__":
     app.setApplicationName("MetalSlugFontReborn")
     app.setOrganizationName("MetalSlugFontReborn")
     app.setWindowIcon(QIcon(str(PROJECT_ROOT / "Assets" / "Icons" / "Raubtier.ico")))
-    if sys.platform.startswith("linux"):
+    if platform.system() == "Linux":
         app.setDesktopFileName("MetalSlugFontReborn")
     app.setStyle(
         pick_style(platform.system(), platform.release(), QStyleFactory.keys())
