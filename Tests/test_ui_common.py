@@ -165,3 +165,22 @@ def test_config_normalizes_boolean_values(tmp_path):
     assert cfg.get("skip_char_replace_confirm") is False
     assert cfg.get("skip_theme_prompt") is True
     assert cfg.get("theme") == "Dark"
+
+
+def test_about_dialog_lazy_loads_license_and_is_wide(qapp, tmp_path):
+    from PySide6.QtWidgets import QTabWidget
+
+    from ui_common import build_about_dialog
+
+    dialog = build_about_dialog(None)
+    try:
+        assert dialog.minimumWidth() == 585
+        tabs = dialog.findChild(QTabWidget)
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        edit = tabs.widget(1).findChild(QPlainTextEdit)
+        assert edit.toPlainText() == ""
+        tabs.setCurrentIndex(1)
+        assert "GNU" in edit.toPlainText()
+    finally:
+        dialog.close()

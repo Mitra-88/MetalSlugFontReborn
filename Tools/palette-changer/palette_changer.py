@@ -13,7 +13,7 @@ from color_variants import (
 )
 from PIL import Image
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -60,6 +60,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Palette Changer")
         self.setMinimumWidth(560)
+        icon_path = Path(__file__).resolve().parents[2] / "Assets" / "Icons" / "Raubtier.ico"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
 
         self._files = []
         self._palette = []
@@ -421,8 +424,17 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "Mitra88.MetalSlugFontReborn.PaletteChanger"
+        )
     app = QApplication(sys.argv)
     app.setApplicationName("Palette Changer")
+    icon_path = Path(__file__).resolve().parents[2] / "Assets" / "Icons" / "Raubtier.ico"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
     window = MainWindow()
     window.resize(660, 660)
     window.show()

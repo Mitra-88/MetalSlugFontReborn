@@ -383,3 +383,16 @@ def test_clean_text_normalizes_carriage_returns(qapp, tmp_path, monkeypatch):
         assert text == "HI\nYO\nK"
     finally:
         window.close()
+
+
+def test_main_window_and_app_carry_the_icon(qapp, tmp_path, monkeypatch):
+    import ui_common
+    from ui_common import Config
+
+    monkeypatch.setattr("main.load_config", lambda *args, **kwargs: True)
+    monkeypatch.setattr(ui_common, "config", Config(tmp_path / "config.toml"))
+    window = MainWindow()
+    try:
+        assert not window.windowIcon().isNull()
+    finally:
+        window.close()

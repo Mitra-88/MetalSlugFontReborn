@@ -32,7 +32,7 @@ from image_generation import get_font_charset, get_font_colors, get_font_ids
 from system_info import build_date, get_system_info, msfr_version
 from themes import dark_mode, light_mode, tokyo_night
 
-ABOUT_DIALOG_MIN_WIDTH = 450
+ABOUT_DIALOG_MIN_WIDTH = 585
 ABOUT_LAYOUT_SPACING = 15
 INFO_LAYOUT_SPACING = 2
 APP_ICON_SIZE = 64
@@ -302,13 +302,19 @@ def build_about_dialog(parent=None):
     license_layout = QVBoxLayout(license_tab)
 
     license_text_edit = QPlainTextEdit()
-    license_text_edit.setPlainText(load_license_text())
     license_text_edit.setReadOnly(True)
     license_text_edit.setLineWrapMode(QPlainTextEdit.WidgetWidth)
     license_text_edit.setStyleSheet("font-family: Consolas, 'Courier New', monospace;")
 
     license_layout.addWidget(license_text_edit)
     tab_widget.addTab(license_tab, "License")
+
+    def _load_license_on_first_open(index):
+        if tab_widget.widget(index) is license_tab:
+            license_text_edit.setPlainText(load_license_text())
+            tab_widget.currentChanged.disconnect(_load_license_on_first_open)
+
+    tab_widget.currentChanged.connect(_load_license_on_first_open)
 
     main_layout.addWidget(tab_widget)
 

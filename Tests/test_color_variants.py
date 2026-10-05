@@ -298,3 +298,13 @@ def test_hue_slider_drives_whole_detected_palette(qapp, tmp_path):
         assert all(window._mappings[rgb] == rgb for rgb in palette)
     finally:
         window.close()
+
+
+def test_palette_changer_has_the_app_icon(qapp):
+    from palette_changer import MainWindow
+
+    window = MainWindow()
+    try:
+        assert not window.windowIcon().isNull()
+    finally:
+        window.close()
