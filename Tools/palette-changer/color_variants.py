@@ -32,7 +32,7 @@ def load_rgba(path):
     return image.convert("RGBA")
 
 
-def collect_palette(files, max_colors=MAX_PALETTE_COLORS):
+def collect_palette(files, max_colors=None):
     counts = {}
     for path, _rel in files:
         image = load_rgba(path)
@@ -44,7 +44,9 @@ def collect_palette(files, max_colors=MAX_PALETTE_COLORS):
                 key = color[:3]
                 counts[key] = counts.get(key, 0) + count
     ranked = sorted(counts.items(), key=lambda item: -item[1])
-    return [color for color, _count in ranked[:max_colors]]
+    if max_colors is not None:
+        ranked = ranked[:max_colors]
+    return [color for color, _count in ranked]
 
 
 def rgb_to_hsv(r, g, b):

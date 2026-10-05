@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 from color_variants import (
-    MAX_PALETTE_COLORS,
     adjust_color,
     collect_palette,
     export_recolored,
@@ -67,6 +66,7 @@ class MainWindow(QMainWindow):
         self._selected_rgb = None
         self._selected_button = None
         self._base_hue = None
+        self._base_color = None
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -207,22 +207,26 @@ class MainWindow(QMainWindow):
         )
         return hue_shift(rgb, round((hue * 360 + degrees) % 360))
 
-    def _detect_base_hue(self):
+    def _detect_base_color(self):
         for rgb in self._palette:
             hue, sat, val = colorsys.rgb_to_hsv(
                 rgb[0] / 255, rgb[1] / 255, rgb[2] / 255
             )
             if sat >= 0.15 and val >= 0.15:
-                return round(hue * 360)
-        return None
+                return round(hue * 360), rgb
+        return None, None
 
     def _update_hue_preview(self, value):
-        if self._base_hue is None:
-            hue = value
+        if self._base_color is not None:
+            fill = "#{:02x}{:02x}{:02x}".format(
+                *self._rotate_hue(self._base_color, value)
+            )
+        elif self._base_hue is not None:
+            fill = QColor.fromHsv(self._base_hue, 255, 255).name()
         else:
-            hue = (self._base_hue + value) % 360
+            fill = QColor.fromHsv(value, 255, 255).name()
         self.hue_preview.setStyleSheet(
-            f"background-color: {QColor.fromHsv(hue, 255, 255).name()};"
+            f"background-color: {fill};"
             f"border: 1px solid rgba(0, 0, 0, 60); border-radius: 4px;"
         )
         self.hue_value_label.setText(f"{value}°")
@@ -266,6 +270,7 @@ class MainWindow(QMainWindow):
                 widget.deleteLater()
         self.export_button.setEnabled(False)
         self._base_hue = None
+        self._base_color = None
         self._set_tuning_enabled(False)
 
     def _set_tuning_enabled(self, enabled):
@@ -289,7 +294,7 @@ class MainWindow(QMainWindow):
                     f"No .png sprites found (subfolders are scanned too):\n{folder}",
                 )
                 return
-            self._palette = collect_palette(self._files)
+            self._palette = collect_palette(self._files, max_colors=None)
         except (OSError, ValueError, Image.DecompressionBombError) as e:
             self._reset_palette_state()
             QMessageBox.critical(
@@ -300,21 +305,20 @@ class MainWindow(QMainWindow):
         self._selected_rgb = None
         self._selected_button = None
         self._rebuild_swatches()
-        self._base_hue = self._detect_base_hue()
+        self._base_hue, self._base_color = self._detect_base_color()
         self.hue_slider.blockSignals(True)
         self.hue_slider.setValue(0)
         self.hue_slider.blockSignals(False)
         for rgb in self._palette:
             self._mappings[rgb] = rgb
         self._refresh_previews()
+        self._update_hue_preview(0)
         self.export_button.setEnabled(True)
         self._set_tuning_enabled(True)
         label = (
             f"{len(self._files)} sprites, {len(self._palette)} colors detected. "
             "Drag the hue slider to shift every color at once."
         )
-        if len(self._palette) >= MAX_PALETTE_COLORS:
-            label += f" Showing the {MAX_PALETTE_COLORS} most-used colors."
         self.palette_label.setText(label)
 
     def _rebuild_swatches(self):
