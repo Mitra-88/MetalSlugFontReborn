@@ -50,9 +50,7 @@ jobs:
         run: git rev-parse --short HEAD > Src/build_commit.txt
 
       - name: Build rotation library
-        run: |
-          rustup update stable
-          cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
+        run: cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
 
       - name: Build with PyInstaller
         run: |
@@ -109,9 +107,7 @@ jobs:
         run: git rev-parse --short HEAD > Src/build_commit.txt
 
       - name: Build rotation library
-        run: |
-          rustup update stable
-          cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
+        run: cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
 
       - name: Build with PyInstaller
         run: |
@@ -169,9 +165,7 @@ jobs:
         run: git rev-parse --short HEAD > Src/build_commit.txt
 
       - name: Build rotation library
-        run: |
-          rustup update stable
-          cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
+        run: cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
 
       - name: Build with PyInstaller
         run: |
