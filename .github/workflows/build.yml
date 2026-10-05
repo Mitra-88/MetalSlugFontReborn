@@ -1,0 +1,251 @@
+name: Build
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - Development
+    paths:
+      - '.github/workflows/**'
+      - 'Assets/**'
+      - 'Src/**'
+      - 'Tools/**'
+      - 'rust/**'
+      - 'versionfile.txt'
+
+jobs:
+  build-windows:
+    name: Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+
+      - name: Set up Python
+        uses: actions/setup-python@751276eafca55f10f252026015f43c488f2322ba
+        with:
+          python-version: '3.14.7'
+          architecture: 'x64'
+          cache: 'pip'
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Create virtual environment
+        run: py -m venv .venv
+
+      - name: Activate virtual environment
+        run: .venv\Scripts\activate
+
+      - name: Install dependencies
+        run: pip install --upgrade PySide6-Essentials pyinstaller pillow tomlkit
+
+      - name: Write build commit
+        shell: bash
+        run: git rev-parse --short HEAD > Src/build_commit.txt
+
+      - name: Build rotation library
+        run: |
+          rustup update stable
+          cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onedir --windowed --icon "Assets/Icons/Raubtier.ico" --name "MetalSlugFontReborn" --clean --optimize "2" --version-file "versionfile.txt" --add-data "Src/build_commit.txt;." --add-data "LICENSE;." --add-data "Assets;Assets/" --add-binary "rust/rotsprite-rs/target/release/msfr_rotsprite.dll;."  "Src/main.py"
+
+      - name: Trim unused Qt components
+        shell: bash
+        run: |
+          cd dist/MetalSlugFontReborn/_internal
+          rm -rf PySide6/translations PySide6/plugins/tls PySide6/plugins/networkinformation PySide6/plugins/generic PySide6/plugins/iconengines setuptools
+          rm -f PySide6/opengl32sw.dll PySide6/Qt6Network* PySide6/Qt6Svg* libcrypto-3-x64.dll libssl-3-x64.dll
+
+      - name: Move Assets
+        run: |
+          mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: MetalSlugFontReborn-${{ steps.sha.outputs.short_sha }}-Windows-x64
+          path: dist/MetalSlugFontReborn
+          compression-level: 9
+
+  build-linux:
+    name: Linux
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+
+      - name: Set up Python
+        uses: actions/setup-python@751276eafca55f10f252026015f43c488f2322ba
+        with:
+          python-version: '3.14.7'
+          architecture: 'x64'
+          cache: 'pip'
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Create virtual environment
+        run: python3 -m venv .venv
+
+      - name: Activate virtual environment
+        run: source .venv/bin/activate
+
+      - name: Install dependencies
+        run: pip install --upgrade PySide6-Essentials pyinstaller pillow tomlkit
+
+      - name: Write build commit
+        run: git rev-parse --short HEAD > Src/build_commit.txt
+
+      - name: Build rotation library
+        run: |
+          rustup update stable
+          cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/build_commit.txt:." --add-data "LICENSE:." --add-data "Assets:Assets/" --add-binary "rust/rotsprite-rs/target/release/libmsfr_rotsprite.so:."  "Src/main.py"
+
+      - name: Trim unused Qt components
+        run: |
+          cd dist/MetalSlugFontReborn/_internal
+          rm -rf PySide6/translations PySide6/plugins/tls PySide6/plugins/networkinformation PySide6/plugins/generic PySide6/plugins/iconengines setuptools
+          rm -f PySide6/opengl32sw.dll PySide6/Qt6Network* PySide6/Qt6Svg* PySide6/libQt6Network* PySide6/libQt6Svg* libcrypto* libssl*
+          rm -rf PySide6/Qt/translations PySide6/Qt/plugins/tls PySide6/Qt/plugins/networkinformation PySide6/Qt/plugins/generic PySide6/Qt/plugins/iconengines
+          rm -f PySide6/Qt/lib/libQt6Network* PySide6/Qt/lib/libQt6Svg* PySide6/Qt/lib/libcrypto* PySide6/Qt/lib/libssl*
+
+      - name: Move Assets
+        run: |
+          mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: MetalSlugFontReborn-${{ steps.sha.outputs.short_sha }}-Linux-x64
+          path: dist/MetalSlugFontReborn
+          compression-level: 9
+
+  build-macos:
+    name: macOS
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+
+      - name: Set up Python
+        uses: actions/setup-python@751276eafca55f10f252026015f43c488f2322ba
+        with:
+          python-version: '3.14.7'
+          architecture: 'arm64'
+          cache: 'pip'
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Create virtual environment
+        run: python3 -m venv .venv
+
+      - name: Activate virtual environment
+        run: source .venv/bin/activate
+
+      - name: Install dependencies
+        run: pip install --upgrade PySide6-Essentials pyinstaller pillow tomlkit
+
+      - name: Write build commit
+        run: git rev-parse --short HEAD > Src/build_commit.txt
+
+      - name: Build rotation library
+        run: |
+          rustup update stable
+          cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/build_commit.txt:." --add-data "LICENSE:." --add-data "Assets:Assets/" --add-binary "rust/rotsprite-rs/target/release/libmsfr_rotsprite.dylib:."  "Src/main.py"
+
+      - name: Trim unused Qt components
+        run: |
+          cd dist/MetalSlugFontReborn/_internal
+          rm -rf PySide6/translations PySide6/plugins/tls PySide6/plugins/networkinformation PySide6/plugins/generic PySide6/plugins/iconengines setuptools
+          rm -f PySide6/opengl32sw.dll PySide6/Qt6Network* PySide6/Qt6Svg* PySide6/libQt6Network* PySide6/libQt6Svg* libcrypto* libssl*
+          rm -rf PySide6/Qt/translations PySide6/Qt/plugins/tls PySide6/Qt/plugins/networkinformation PySide6/Qt/plugins/generic PySide6/Qt/plugins/iconengines
+          rm -f PySide6/Qt/lib/libQt6Network* PySide6/Qt/lib/libQt6Svg* PySide6/Qt/lib/libcrypto* PySide6/Qt/lib/libssl*
+
+      - name: Move Assets
+        run: |
+          mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: MetalSlugFontReborn-${{ steps.sha.outputs.short_sha }}-macOS-ARM64
+          path: dist/MetalSlugFontReborn
+          compression-level: 9
+
+  profiler:
+    name: Profiler
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+
+      - name: Set up Python
+        uses: actions/setup-python@751276eafca55f10f252026015f43c488f2322ba
+        with:
+          python-version: '3.14.7'
+          architecture: 'x64'
+          cache: 'pip'
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Create virtual environment
+        run: py -m venv .venv
+
+      - name: Activate virtual environment
+        run: .venv\Scripts\activate
+
+      - name: Install dependencies
+        run: pip install --upgrade pyinstaller pillow
+
+      - name: Build the profiler
+        run: |
+          pyinstaller --noconfirm --onedir --console --clean --icon "Assets/Icons/Raubtier.ico" --name "MSFRProfiler" --paths Src --add-data "Assets;Assets/" Tools/sample_profiler.py
+
+      - name: Move Assets
+        run: |
+          mv dist/MSFRProfiler/_internal/Assets dist/MSFRProfiler/
+
+      - name: Smoke test the profiler
+        shell: bash
+        run: |
+          output=$(./dist/MSFRProfiler/MSFRProfiler.exe 2>&1 | head -1)
+          echo "$output"
+          case "$output" in
+            *"supported font 1 characters"*) echo "profiler runs" ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: MSFRProfiler-${{ steps.sha.outputs.short_sha }}-Windows-x64
+          path: dist/MSFRProfiler
+          compression-level: 9

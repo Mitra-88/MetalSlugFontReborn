@@ -1,12 +1,3 @@
-"""Sample profiler for the image generation path.
-
-Run from the repo root:
-    .venv/Scripts/python.exe Tools/sample_profiler.py
-
-Reports cProfile hot spots, tracemalloc allocation hot spots, and process
-memory growth over repeated renders (leak check). Benchmark here before and
-after any performance change.
-"""
 
 import cProfile
 import io

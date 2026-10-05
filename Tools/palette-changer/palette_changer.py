@@ -4,7 +4,6 @@ from pathlib import Path
 
 from color_variants import (
     MAX_PALETTE_COLORS,
-    NEUTRAL_SATURATION,
     adjust_color,
     collect_palette,
     export_recolored,
@@ -362,9 +361,6 @@ class MainWindow(QMainWindow):
         self._add_mapping(rgb, button)
 
     def _add_mapping(self, rgb, button):
-        delta = self.hue_slider.value()
-        if self._base_hue is not None:
-            delta = (self.hue_slider.value() - self._base_hue) % 360
         self._mappings[rgb] = self._rotate_hue(rgb, self.hue_slider.value())
         self._refresh_previews()
         if button is not None:

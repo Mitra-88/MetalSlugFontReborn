@@ -40,7 +40,7 @@ git pull
 To compile MetalSlugFontReborn you will need the following:
 
 - [Python](https://www.python.org/) 3.12 or later
-- [Rust](https://www.rust-lang.org/tools/install) 1.70 or later, for the native rotation library. Without it the build still works and rotation falls back to a slower pure-Python engine.
+- [Rust](https://www.rust-lang.org/tools/install) 1.85 or later (the crate uses the 2024 edition), for the native rotation library. Without it the build still works and rotation falls back to a slower pure-Python engine.
 - [PyInstaller](https://pyinstaller.org/en/stable/) 6.22.2 or later
 - [PySide6-Essentials](https://pypi.org/project/PySide6/) 6.11.2 or later
 - [Pillow](https://pillow.readthedocs.io/en/stable/) 12.3.0 or later

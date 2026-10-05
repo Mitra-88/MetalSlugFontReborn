@@ -4,7 +4,7 @@ MetalSlugFontReborn is a cross-platform PySide6 desktop app that renders text in
 
 ## Build & run
 
-Dependencies: Python 3.12+ and `requirements.txt` (PySide6-Essentials, pillow, pyinstaller, tomlkit). The repo's `.venv` already has them installed. Rust (cargo 1.70+) is only needed to rebuild the native rotation library; without the built cdylib the app and the tests fall back to the pure-Python engine automatically.
+Dependencies: Python 3.12+ and `requirements.txt` (PySide6-Essentials, pillow, pyinstaller, tomlkit, pytest). The repo's `.venv` already has them installed. Rust (cargo 1.85+ for the 2024 edition) is only needed to rebuild the native rotation library; without the built cdylib the app and the tests fall back to the pure-Python engine automatically.
 
 Run from source, from any cwd (the script's dir goes on `sys.path`, so the intra-`Src` imports resolve):
 
@@ -14,7 +14,7 @@ Run from source, from any cwd (the script's dir goes on `sys.path`, so the intra
 
 Fresh setup: `py -m venv .venv`, activate it, `pip install -r requirements.txt`.
 
-Packaging: the two `pyinstaller` commands in `Docs/BUILD.md` (Windows separator `;`, Linux/macOS `:`) are the source of truth, and `.github/workflows/build-*.yml` run the same commands. Every workflow first runs `cargo build --release` and ships the cdylib via `--add-binary` (`msfr_rotsprite.dll` / `libmsfr_rotsprite.so` / `libmsfr_rotsprite.dylib`), so the packaged app always rotates natively; GitHub runners have Rust preinstalled, and `rust/**` is in every workflow's path triggers. Only true data files are passed via `--add-data` (`build_commit.txt`, `LICENSE`, `Assets`); the Python modules are collected automatically by PyInstaller's static analysis and PySide6 hooks, so never add per-module `--add-data` entries. The post-build "trim unused Qt components" step (opengl32sw, Qt6Network/Qt6Svg, TLS/networkinformation/generic/iconengines plugins, translations, OpenSSL, setuptools) cut the Windows bundle from 109 MB to 73 MB and is verified by an offscreen run. The post-build step that moves `dist/.../_internal/Assets` next to the exe is load-bearing, see Gotchas. To smoke-test a bundle headlessly: set `QT_QPA_PLATFORM=offscreen`, run the exe, and confirm the process stays alive.
+Packaging: the three `pyinstaller` commands in `Docs/BUILD.md` (Windows separator `;`, Linux/macOS `:`) are the source of truth, and the three per-OS jobs in `.github/workflows/build.yml` run the same commands. Every job first runs `rustup update stable` and `cargo build --release`, shipping the cdylib via `--add-binary` (`msfr_rotsprite.dll` / `libmsfr_rotsprite.so` / `libmsfr_rotsprite.dylib`), so the packaged app always rotates natively; the rustup update is required because the crate uses the 2024 edition. `rust/**` is in the workflow's path triggers. A fourth `profiler` job builds `Tools/sample_profiler.py` as a standalone Windows exe (onedir with bundled Assets, `--icon Assets/Icons/Raubtier.ico`), gated by `Tools/**` in the path triggers. Only true data files are passed via `--add-data` (`build_commit.txt`, `LICENSE`, `Assets`); the Python modules are collected automatically by PyInstaller's static analysis and PySide6 hooks, so never add per-module `--add-data` entries. The post-build "trim unused Qt components" step (opengl32sw, Qt6Network/Qt6Svg, TLS/networkinformation/generic/iconengines plugins, translations, OpenSSL, setuptools) cut the Windows bundle from 109 MB to 73 MB and is verified by an offscreen run. The post-build step that moves `dist/.../_internal/Assets` next to the exe is load-bearing, see Gotchas. To smoke-test a bundle headlessly: set `QT_QPA_PLATFORM=offscreen`, run the exe, and confirm the process stays alive.
 
 Tests: `.venv/Scripts/python.exe -m pytest` (headless via the offscreen QPA, no display or network needed).
 
@@ -52,7 +52,8 @@ Theming: three QPalette themes live in `Src/themes.py`. Until the user picks one
 - `Src/special_characters.py`: the `special_characters` dict (char to asset name) and `LICENSE_TEXT`.
 - `Assets/Fonts/Font-{1..5}/MS-{Color}/`: `Letters/Lower-Case`, `Letters/Upper-Case`, `Numbers`, `Symbols`.
 - `Docs/BUILD.md`: exact packaging commands per OS.
-- `Tools/sample_profiler.py`: benchmark and profile harness for the generation path (cProfile hot spots, tracemalloc, RSS leak check).
+- `Docs/INSTALL-*.md` and `Docs/SUPPORTED.md`: user-facing install guides and the supported-character sheet; `Docs/EXAMPLES.md` shows rendered samples per font and color.
+- `Tools/sample_profiler.py`: benchmark and profile harness for the generation path (cProfile hot spots, tracemalloc, RSS leak check). It benches every supported Font 1 character and ships as a standalone Windows exe from the CI `profiler` job.
 - `Tools/palette-changer/`: standalone Qt6 tool, independent of the main app (run `python Tools/palette-changer/palette_changer.py`). Recolors a sprite folder and its subfolders into a new hue while keeping every color's shading level, with brightness/saturation/contrast adjustments. Hue-only is the only replace mode and the hue comes from a dedicated hue slider (saturation and brightness are preserved by design, so a full color picker would be meaningless). The engine (`color_variants.py`) is Pillow-only: per-channel LUT masks for exact-color remap, one composed LUT for brightness+contrast, Pillow's C saturation enhancer, alpha preserved per pixel. Covered by `Tests/test_color_variants.py` (hue accuracy checked against `colorsys` across the wheel; pytest's pythonpath includes `Tools/palette-changer`). The Aseprite Lua version this replaced was removed on 2026-09-27.
 - `Tests/`: pytest suite (renderer layout and math, config resilience, full sprite-on-disk coverage for every valid character, config/theme behavior, style picking, color variant creation, rotation quality, native/pure rotation parity, MainWindow smoke). Tests that open the MainWindow must stub `main.ImageWorker.process` and point `window.save_path` at tmp_path: a real queued generation writes a uuid png to the actual Desktop and its finished modal hangs any later `processEvents()`. They must also set `skip_location_prompt` in the config fixture (or never `show()` the window): the save-folder prompt is modal and hangs headless runs.
 
@@ -122,6 +123,16 @@ Not lazy about: understanding the problem (read it fully and trace the real flow
 
 (Yes, this file also applies to agents working on the ponytail repo itself. Especially to them.)
 
+## Platform compatibility and theme detection
+
+Build systems versus user systems: Linux artifacts are built on pinned `ubuntu-22.04` (glibc 2.35 floor), Windows artifacts on `windows-latest` and ship the full CRT set app-local (`VCRUNTIME140*`, `MSVCP140*`, `ucrtbase`), so no VC++ redistributable is needed on clean Windows 10 or 11, and macOS artifacts are built on `macos-15` arm64 with the Python 3.14 interpreter, which sets the minimum macOS version. Bundles deliberately exclude OpenSSL, libxcb and the host X/Wayland libraries: Qt loads the user's newer system copies at runtime, and shipping stale ones is the classic undefined-symbol crash.
+
+Theme detection: the app follows the system through `QStyleHints.colorScheme`. Qt resolves it per platform from the `AppsUseLightTheme` registry value (Windows 10 1903+; older reports Unknown), `NSApplication.effectiveAppearance` (macOS), and `org.freedesktop.appearance` over the XDG Desktop Portal (GNOME, KDE Plasma, Cinnamon, XFCE 4.18+, LXQt, COSMIC). Unknown means Light plus the startup chooser. The app never reads `gsettings` or the registry itself: Qt already aggregates those sources, and a second implementation would only add ways to disagree with Qt. Widget styles are `windows11` on Windows 11, `macOS` on macOS and Fusion everywhere else, always validated against `QStyleFactory.keys()`; Linux always gets Fusion. Qt 6 handles per-screen integer and fractional HiDPI scaling, and all window minimums are layout-driven and font-metric derived.
+
+Linux desktops without a portal (LXDE, i3, headless) fall back to the Light theme and Qt's own dialogs. macOS builds are unsigned, so Gatekeeper blocks first launch; right-click Open or `xattr -cr MetalSlugFontReborn.app` works, and a real fix needs an Apple Developer ID.
+
+Tested matrix: Windows 11 GUI use is tested every release; Windows and Linux CI builds are build-tested per release; macOS is build-tested but launch-unverified (no hardware); hand-run Wayland sessions are unexercised because frozen builds default to the xcb backend so the window manager draws decorations; clean Windows VMs without VC++ are unrun but the CRT set is verified present. Known limitations: CJK input is unavailable in frozen Linux builds (compose IM workaround), the xcb system libraries are a frozen-Linux runtime requirement, there are no deb/rpm packages, and the release artifact is the PyInstaller folder.
+
 ## Gotchas & quirks
 
 - `PROJECT_ROOT` is the parent of `Src`. In frozen builds `__file__` sits inside `_internal`, so `PROJECT_ROOT` lands on the app folder itself, which is exactly why the build moves `Assets` out of `_internal` next to the exe. Never "simplify" these paths to cwd-relative ones.
@@ -183,7 +194,7 @@ Every third-party library this project uses is installed in `.venv\Lib\site-pack
 
 - Qt APIs: `PySide6\QtCore`, `PySide6\QtGui`, `PySide6\QtWidgets` in site-packages.
 - Pillow APIs: `PIL\` in site-packages.
-- Packaging commands: `Docs/BUILD.md`. User-facing features: `README.md`. Project platform/theme docs: `Docs/PLATFORM-COMPATIBILITY.md` and `Docs/THEME-DETECTION.md`. The `.venv` tree is for third-party API verification only; nothing project-owned lives there.
+- Packaging commands: `Docs/BUILD.md`. User-facing features: `README.md`. Platform and theme-detection notes live in the platform compatibility section below. The `.venv` tree is for third-party API verification only; nothing project-owned lives there.
 - CLI tooling: see RTK below.
 
 ## RTK
