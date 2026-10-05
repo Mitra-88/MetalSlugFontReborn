@@ -13,6 +13,7 @@ on:
       - 'Src/**'
       - 'Tools/**'
       - 'rust/**'
+      - 'requirements.txt'
       - 'versionfile.txt'
 
 jobs:
@@ -24,33 +25,46 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
 
-      - name: Set up Python
-        uses: actions/setup-python@751276eafca55f10f252026015f43c488f2322ba
+      - name: Install uv
+        shell: pwsh
+        run: |
+          irm https://astral.sh/uv/install.ps1 | iex
+          echo "$env:USERPROFILE\.local\bin" >> $env:GITHUB_PATH
+
+      - name: Install Python
+        run: uv python install 3.14.8
+
+      - name: Create virtual environment
+        run: uv venv --python 3.14.8
+
+      - name: Restore uv cache
+        uses: actions/cache@v6
         with:
-          python-version: '3.14.7'
-          architecture: 'x64'
-          cache: 'pip'
+          path: ~\AppData\Local\uv\cache
+          key: ${{ runner.os }}-uv-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Install dependencies
+        run: uv pip install -r requirements.txt
+
+      - name: Put the virtual environment on PATH
+        shell: pwsh
+        run: echo "$env:GITHUB_WORKSPACE\.venv\Scripts" >> $env:GITHUB_PATH
 
       - name: Get short SHA
         id: sha
         run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
         shell: bash
 
-      - name: Create virtual environment
-        run: py -m venv .venv
-
-      - name: Activate virtual environment
-        run: .venv\Scripts\activate
-
-      - name: Install dependencies
-        run: pip install --upgrade PySide6-Essentials pyinstaller pillow tomlkit
-
       - name: Write build commit
         shell: bash
         run: git rev-parse --short HEAD > Src/build_commit.txt
 
       - name: Build rotation library
-        run: cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
+        run: |
+          rustup update stable
+          cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
 
       - name: Build with PyInstaller
         run: |
@@ -82,32 +96,43 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
 
-      - name: Set up Python
-        uses: actions/setup-python@751276eafca55f10f252026015f43c488f2322ba
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install Python
+        run: uv python install 3.14.8
+
+      - name: Create virtual environment
+        run: uv venv --python 3.14.8
+
+      - name: Restore uv cache
+        uses: actions/cache@v6
         with:
-          python-version: '3.14.7'
-          architecture: 'x64'
-          cache: 'pip'
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Install dependencies
+        run: uv pip install -r requirements.txt
+
+      - name: Put the virtual environment on PATH
+        run: echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Get short SHA
         id: sha
         run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
         shell: bash
 
-      - name: Create virtual environment
-        run: python3 -m venv .venv
-
-      - name: Activate virtual environment
-        run: source .venv/bin/activate
-
-      - name: Install dependencies
-        run: pip install --upgrade PySide6-Essentials pyinstaller pillow tomlkit
-
       - name: Write build commit
         run: git rev-parse --short HEAD > Src/build_commit.txt
 
       - name: Build rotation library
-        run: cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
+        run: |
+          rustup update stable
+          cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
 
       - name: Build with PyInstaller
         run: |
@@ -134,38 +159,49 @@ jobs:
 
   build-macos:
     name: macOS
-    runs-on: macos-15
+    runs-on: macOS-15-arm64
 
     steps:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
 
-      - name: Set up Python
-        uses: actions/setup-python@751276eafca55f10f252026015f43c488f2322ba
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install Python
+        run: uv python install 3.14.8
+
+      - name: Create virtual environment
+        run: uv venv --python 3.14.8
+
+      - name: Restore uv cache
+        uses: actions/cache@v6
         with:
-          python-version: '3.14.7'
-          architecture: 'arm64'
-          cache: 'pip'
+          path: ~/Library/Caches/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Install dependencies
+        run: uv pip install -r requirements.txt
+
+      - name: Put the virtual environment on PATH
+        run: echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Get short SHA
         id: sha
         run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
         shell: bash
 
-      - name: Create virtual environment
-        run: python3 -m venv .venv
-
-      - name: Activate virtual environment
-        run: source .venv/bin/activate
-
-      - name: Install dependencies
-        run: pip install --upgrade PySide6-Essentials pyinstaller pillow tomlkit
-
       - name: Write build commit
         run: git rev-parse --short HEAD > Src/build_commit.txt
 
       - name: Build rotation library
-        run: cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
+        run: |
+          rustup update stable
+          cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
 
       - name: Build with PyInstaller
         run: |
@@ -198,26 +234,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
 
-      - name: Set up Python
-        uses: actions/setup-python@751276eafca55f10f252026015f43c488f2322ba
+      - name: Install uv
+        shell: pwsh
+        run: |
+          irm https://astral.sh/uv/install.ps1 | iex
+          echo "$env:USERPROFILE\.local\bin" >> $env:GITHUB_PATH
+
+      - name: Install Python
+        run: uv python install 3.14.8
+
+      - name: Create virtual environment
+        run: uv venv --python 3.14.8
+
+      - name: Restore uv cache
+        uses: actions/cache@v6
         with:
-          python-version: '3.14.7'
-          architecture: 'x64'
-          cache: 'pip'
+          path: ~\AppData\Local\uv\cache
+          key: ${{ runner.os }}-uv-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Install dependencies
+        run: uv pip install pyinstaller pillow
+
+      - name: Put the virtual environment on PATH
+        shell: pwsh
+        run: echo "$env:GITHUB_WORKSPACE\.venv\Scripts" >> $env:GITHUB_PATH
 
       - name: Get short SHA
         id: sha
         run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
         shell: bash
-
-      - name: Create virtual environment
-        run: py -m venv .venv
-
-      - name: Activate virtual environment
-        run: .venv\Scripts\activate
-
-      - name: Install dependencies
-        run: pip install --upgrade pyinstaller pillow
 
       - name: Build the profiler
         run: |
