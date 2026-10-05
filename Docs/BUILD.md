@@ -54,9 +54,8 @@ Open Powershell and run:
 
 ```sh
 cd MetalSlugFontReborn
-py -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
+uv python install 3.14.8
+uv sync --frozen
 git rev-parse --short HEAD > Src\build_commit.txt
 cargo build --release --manifest-path rust\rotsprite-rs\Cargo.toml
 ```
@@ -93,9 +92,8 @@ Open the terminal and run:
 
 ```sh
 cd MetalSlugFontReborn
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv python install 3.14.8
+uv sync --frozen
 git rev-parse --short HEAD > Src/build_commit.txt
 cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
 ```
