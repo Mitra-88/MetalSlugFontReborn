@@ -870,3 +870,17 @@ def test_rotated_render_runs_on_worker_thread(qapp, tmp_path, monkeypatch):
     finally:
         dialog._dirty = False
         dialog.close()
+
+
+def test_dialog_destroy_under_pending_renders_does_not_abort(qapp, tmp_path):
+    import gc
+
+    dialog = make_dialog(tmp_path)
+    for item in dialog.items:
+        item.rotation = 217
+        item.update_pixmap()
+    dialog._dirty = False
+    dialog.close()
+    del dialog
+    gc.collect()
+    qapp.processEvents()

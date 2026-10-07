@@ -1,11 +1,13 @@
 import os
+import queue
+import threading
 from enum import IntEnum
 from math import atan2, ceil, degrees, floor
 from pathlib import Path
 from time import time
 
 from PIL import Image, ImageQt
-from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -385,53 +387,60 @@ def render_character(
     return img
 
 
-class RenderWorker(QObject):
-    rendered = Signal(object, object, object, object)
-
-    def render(self, item, sprite, key, quality):
-        rendered = render_character(
+def render_job(sprite, key, quality):
+    try:
+        return render_character(
             sprite, key[0], key[1], quality, key[2], key[3], key[4], key[5]
         )
-        self.rendered.emit(item, sprite, key, rendered)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 class RenderDispatcher(QObject):
-    dispatch = Signal(object, object, object, object)
+    render_ready = Signal(object, object, object, object)
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.thread = QThread()
-        self.worker = RenderWorker()
-        self.worker.moveToThread(self.thread)
-        self.dispatch.connect(self.worker.render)
-        self.worker.rendered.connect(self._on_rendered)
-        self.pending = {}
-        self.busy = False
-        self.thread.start(QThread.Priority.LowPriority)
+        self.render_ready.connect(self._on_rendered)
+        self._jobs = queue.Queue()
+        self._thread = threading.Thread(target=self._work, daemon=True)
+        self._thread.start()
 
     def request(self, item, key):
-        self.pending[id(item)] = (item, item.sprite, key, item.rotation_quality)
-        if not self.busy:
-            self._submit()
+        self._jobs.put((item, item.sprite, key, item.rotation_quality))
 
-    def _submit(self):
-        entry = self.pending.popitem()
-        self.busy = True
-        self.dispatch.emit(*entry[1])
+    def _work(self):
+        while True:
+            job = self._jobs.get()
+            if job is None:
+                return
+            jobs = {id(job[0]): job}
+            while True:
+                try:
+                    job = self._jobs.get_nowait()
+                except queue.Empty:
+                    break
+                if job is None:
+                    return
+                jobs[id(job[0])] = job
+            for item, sprite, key, quality in jobs.values():
+                rendered = render_job(sprite, key, quality)
+                if rendered is None:
+                    continue
+                try:
+                    self.render_ready.emit(item, sprite, key, rendered)
+                except RuntimeError:
+                    return
 
     def _on_rendered(self, item, sprite, key, rendered):
-        self.busy = False
         try:
             item.apply_rendered(sprite, key, rendered)
         except RuntimeError:
             pass
-        if self.pending:
-            self._submit()
 
     def shutdown(self):
-        self.pending.clear()
-        self.thread.quit()
-        self.thread.wait(3000)
+        self._jobs.put(None)
+        self._thread.join(timeout=0.5)
 
 
 class CharItem(QGraphicsPixmapItem):
@@ -568,7 +577,13 @@ class CharItem(QGraphicsPixmapItem):
         if key != self._cache_key():
             return
         self.setPixmap(QPixmap.fromImage(ImageQt.ImageQt(rendered)))
-        self._after_pixmap_change()
+        scene = self.scene()
+        dialog = scene.parent_dialog if scene is not None else None
+        if dialog is None or (
+            dialog._drag_before is None and scene.transform_box._gesture is None
+        ):
+            self._place()
+            scene.transform_box.refresh()
 
     def _after_pixmap_change(self):
         self._place()
