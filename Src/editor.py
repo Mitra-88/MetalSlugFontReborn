@@ -3,7 +3,7 @@ import os
 import queue
 import threading
 from enum import IntEnum
-from math import atan2, cos, degrees, radians, sin
+from math import atan2, ceil, cos, degrees, floor, radians, sin
 from pathlib import Path
 from time import time
 
@@ -952,7 +952,7 @@ class TransformBox:
         elif gesture["kind"] == "scale":
             self._update_scale(scene_pos, modifiers)
         else:
-            self._update_stretch(scene_pos, modifiers)
+            self._update_scale(scene_pos, modifiers)
         dialog = self._scene.parent_dialog
         if dialog is not None:
             dialog._update_scene_rect()
@@ -1028,101 +1028,111 @@ class TransformBox:
 
     def _update_scale(self, scene_pos, modifiers):
         gesture = self._gesture
-        rect = gesture["rect"]
-        anchor = self._anchor_scene(
-            rect,
-            OPPOSITE_CORNER[gesture["name"]],
-            rect.center(),
-            gesture["angle"],
-        )
-        start_dist = self._distance(gesture["start_pos"], anchor)
-        if start_dist < 1e-6:
-            return
-        factor = self._limit_factor(
-            self._distance(scene_pos, anchor) / start_dist, "scale"
-        )
-        single = len(gesture["items"]) == 1
-        for item, initial in gesture["items"].items():
-            scale = round(initial["scale"] * factor)
-            if single and not (modifiers & SNAP_DISABLED_MODIFIER):
-                scale = self._scene.parent_dialog._snap_scale_value(scale)
-            item.scale_pct = scale
-            item.update_pixmap()
-            effective = scale / initial["scale"]
-            top = initial["rect"].topLeft()
-            item.dx = round(
-                anchor.x() + (top.x() - anchor.x()) * effective - item.base_x
-            )
-            item.dy = round(
-                anchor.y() + (top.y() - anchor.y()) * effective - item.base_y
-            )
-            item._place()
-
-    def _update_stretch(self, scene_pos, modifiers):
-        gesture = self._gesture
         name = gesture["name"]
         rect = gesture["rect"]
         angle = gesture["angle"]
-        anchor_local = self._anchor_point(rect, OPPOSITE_EDGE[name])
-        anchor_scene = self._rotate_about(anchor_local, rect.center(), angle)
+        handle_x, handle_y = HANDLE_FRACTIONS[name]
+        pivot_local = QPointF(
+            rect.x() + rect.width() * (1.0 - handle_x),
+            rect.y() + rect.height() * (1.0 - handle_y),
+        )
+        pivot_scene = self._rotate_about(pivot_local, rect.center(), angle)
+        delta = scene_pos - gesture["start_pos"]
         rad = radians(angle)
-        if name in ("e", "w"):
-            attr = "stretch_x"
-            dir_x, dir_y = cos(rad), sin(rad)
+        cos_a = cos(rad)
+        sin_a = sin(rad)
+        dx = delta.x() * cos_a + delta.y() * sin_a
+        dy = -delta.x() * sin_a + delta.y() * cos_a
+        dx = floor(dx) if dx >= 0 else ceil(dx)
+        dy = floor(dy) if dy >= 0 else ceil(dy)
+        w = rect.width() * handle_x + rect.x() - pivot_local.x()
+        h = rect.height() * handle_y + rect.y() - pivot_local.y()
+        if name in ("n", "s"):
+            dx = 0.0
+            w = 1.0
+        elif name in ("e", "w"):
+            dy = 0.0
+            h = 1.0
+
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            u = gesture["start_pos"] - pivot_scene
+            v = scene_pos - pivot_scene
+            u_mag = (u.x() ** 2 + u.y() ** 2) ** 0.5
+            if u_mag < 1e-6:
+                return
+            dot = u.x() * v.x() + u.y() * v.y()
+            factor = abs(dot) / (u_mag * u_mag)
+            if dot < 0:
+                factor = -factor
+            factor_x = factor_y = factor
         else:
-            attr = "stretch_y"
-            dir_x, dir_y = -sin(rad), cos(rad)
+            factor_x = 1.0 + dx / w if w else 1.0
+            factor_y = 1.0 + dy / h if h else 1.0
+        if name in ("n", "s"):
+            factor_x = 1.0
+        elif name in ("e", "w"):
+            factor_y = 1.0
+        factor_x = self._limit_factor(factor_x, "stretch_x")
+        factor_y = self._limit_factor(factor_y, "stretch_y")
 
-        def projection(point):
-            dx = point.x() - anchor_scene.x()
-            dy = point.y() - anchor_scene.y()
-            return dx * dir_x + dy * dir_y
-
-        span = projection(gesture["start_pos"])
-        if abs(span) < 1e-6:
-            return
-        factor = self._limit_factor(projection(scene_pos) / span, attr)
         single = len(gesture["items"]) == 1
         for item, initial in gesture["items"].items():
-            stretch = round(initial[attr] * factor)
+            stretch_x = round(initial["stretch_x"] * factor_x)
+            stretch_y = round(initial["stretch_y"] * factor_y)
             if single and not (modifiers & SNAP_DISABLED_MODIFIER):
-                stretch = self._snap_stretch(stretch)
-            setattr(item, attr, stretch)
+                stretch_x = self._snap_stretch(stretch_x)
+                stretch_y = self._snap_stretch(stretch_y)
+            item.stretch_x = self._clamp(
+                stretch_x, CHAR_SCALE_MIN, CHAR_SCALE_MAX
+            )
+            item.stretch_y = self._clamp(
+                stretch_y, CHAR_SCALE_MIN, CHAR_SCALE_MAX
+            )
             item.update_pixmap()
-            effective = stretch / initial[attr]
+            effective_x = item.stretch_x / initial["stretch_x"]
+            effective_y = item.stretch_y / initial["stretch_y"]
             if angle:
                 top_local = rect.topLeft()
                 size_w, size_h = rect.width(), rect.height()
+                new_x = pivot_local.x() + (top_local.x() - pivot_local.x()) * effective_x
+                new_y = pivot_local.y() + (top_local.y() - pivot_local.y()) * effective_y
+                center_local = QPointF(
+                    new_x + size_w * effective_x / 2, new_y + size_h * effective_y / 2
+                )
+                scene_center = self._rotate_about(
+                    pivot_scene + (center_local - pivot_local), pivot_scene, angle
+                )
+                item.dx = round(
+                    scene_center.x() - item.pixmap().width() / 2 - item.base_x
+                )
+                item.dy = round(
+                    scene_center.y() - item.pixmap().height() / 2 - item.base_y
+                )
             else:
-                top_local = initial["rect"].topLeft()
-                size_w, size_h = initial["rect"].width(), initial["rect"].height()
-            if attr == "stretch_x":
-                new_x = anchor_local.x() + (top_local.x() - anchor_local.x()) * effective
-                new_y = top_local.y()
-                center_local = QPointF(new_x + size_w * effective / 2, new_y + size_h / 2)
-            else:
-                new_x = top_local.x()
-                new_y = anchor_local.y() + (top_local.y() - anchor_local.y()) * effective
-                center_local = QPointF(new_x + size_w / 2, new_y + size_h * effective / 2)
-            delta = center_local - anchor_local
-            scene_center = self._rotate_about(
-                anchor_scene + delta, anchor_scene, angle
-            )
-            item.dx = round(
-                scene_center.x() - item.pixmap().width() / 2 - item.base_x
-            )
-            item.dy = round(
-                scene_center.y() - item.pixmap().height() / 2 - item.base_y
-            )
+                initial_rect = initial["rect"]
+                new_x = (
+                    pivot_scene.x()
+                    + (initial_rect.left() - pivot_scene.x()) * effective_x
+                )
+                new_y = (
+                    pivot_scene.y()
+                    + (initial_rect.top() - pivot_scene.y()) * effective_y
+                )
+                item.dx = round(new_x - item.base_x)
+                item.dy = round(new_y - item.base_y)
             item._place()
 
-    @staticmethod
-    def _distance(a, b):
-        return ((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2) ** 0.5
 
-
-OPPOSITE_CORNER = {"nw": "se", "ne": "sw", "se": "nw", "sw": "ne"}
-OPPOSITE_EDGE = {"e": "w", "w": "e", "n": "s", "s": "n"}
+HANDLE_FRACTIONS = {
+    "nw": (0.0, 0.0),
+    "n": (0.5, 0.0),
+    "ne": (1.0, 0.0),
+    "w": (0.0, 0.5),
+    "e": (1.0, 0.5),
+    "sw": (0.0, 1.0),
+    "s": (0.5, 1.0),
+    "se": (1.0, 1.0),
+}
 
 
 class EditorScene(QGraphicsScene):
@@ -1957,10 +1967,12 @@ class AdvancedEditorDialog(QDialog):
 Mouse
 
 - Select one character to show its transform box: drag the
-  corner squares to scale (the opposite corner stays put), the
-  edge squares to stretch one axis, and the area just outside a
-  corner to rotate around the character's centre. Hold Shift
-  while rotating to snap to 45 degree steps.
+  corner squares to resize width and height independently, just
+  like Aseprite (the opposite corner stays put; hold Shift to
+  keep the aspect ratio while dragging), the edge squares to
+  stretch one axis, and the area just outside a corner to rotate
+  around the character's centre. Hold Shift while rotating to
+  snap to 45 degree steps.
 - Select several characters and the box wraps them all: the
   corner squares scale the whole group and the edge squares
   stretch it in one direction, each character keeping its
@@ -1976,7 +1988,7 @@ Mouse
   click on empty space clears the selection, Escape cancels a
   marquee in progress.
 - With a rotated character selected, the transform box tilts
-  with it: the corner squares scale and the edge squares
+  with it: the corner squares resize and the edge squares
   stretch along the character's own axes, with the opposite
   corner or edge staying pinned, exactly like Aseprite.
 - Ctrl+click adds characters to the selection.

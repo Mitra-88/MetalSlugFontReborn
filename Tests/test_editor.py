@@ -378,11 +378,14 @@ def test_transform_box_scale_gesture(qapp, tmp_path):
         end = anchor + (start - anchor) * 1.5
         box.update(QPointF(end), QtCore.KeyboardModifier.NoModifier)
         box.commit()
-        assert item.scale_pct == 150
+        assert item.scale_pct == 100
+        assert item.stretch_x == 150
+        assert item.stretch_y == 150
         assert box._gesture is None
         assert dialog.undo_stack.can_undo()
         dialog._undo()
-        assert item.scale_pct == 100
+        assert item.stretch_x == 100
+        assert item.stretch_y == 100
     finally:
         dialog._dirty = False
         dialog.close()
@@ -462,11 +465,15 @@ def test_transform_box_multi_selection_scales_together(qapp, tmp_path):
             QtCore.KeyboardModifier.NoModifier,
         )
         box.commit()
-        assert a.scale_pct == 150
-        assert b.scale_pct == 150
-        dialog._undo()
+        assert a.stretch_x == 150
+        assert a.stretch_y == 150
+        assert b.stretch_x == 150
+        assert b.stretch_y == 150
         assert a.scale_pct == 100
         assert b.scale_pct == 100
+        dialog._undo()
+        assert a.stretch_x == 100
+        assert b.stretch_x == 100
     finally:
         dialog._dirty = False
         dialog.close()
@@ -589,16 +596,16 @@ def test_transform_updates_coalesce_until_commit(qapp, tmp_path):
         start = rect.bottomRight()
         box.start("scale", "se", start)
         box.update(QPointF(anchor + (start - anchor) * 1.5), QtCore.KeyboardModifier.NoModifier)
-        assert item.scale_pct == 100
+        assert item.stretch_x == 100
         assert box._pending is not None
         assert box._update_timer.isActive()
         box._flush_update()
-        assert item.scale_pct == 150
+        assert item.stretch_x == 150
         assert box._pending is None
         box.commit()
-        assert item.scale_pct == 150
+        assert item.stretch_x == 150
         dialog._undo()
-        assert item.scale_pct == 100
+        assert item.stretch_x == 100
     finally:
         dialog._dirty = False
         dialog.close()
@@ -611,7 +618,8 @@ def test_multi_scale_clamps_as_one(qapp, tmp_path):
     dialog = make_dialog(tmp_path)
     try:
         a, b = dialog.items[0], dialog.items[1]
-        b.scale_pct = 380
+        b.stretch_x = 300
+        b.stretch_y = 300
         b.update_pixmap()
         a.setSelected(True)
         b.setSelected(True)
@@ -625,15 +633,16 @@ def test_multi_scale_clamps_as_one(qapp, tmp_path):
             QtCore.KeyboardModifier.NoModifier,
         )
         box.commit()
-        limit = 400 / 380
-        assert b.scale_pct == 400
-        assert a.scale_pct == round(100 * limit)
+        limit = 400 / 300
+        assert b.stretch_x == 400
+        assert a.stretch_x == round(100 * limit)
         for item in (a, b):
             assert item.pos().x() == int(item.pos().x())
             assert item.pos().y() == int(item.pos().y())
         dialog._undo()
-        assert a.scale_pct == 100
-        assert b.scale_pct == 380
+        assert a.stretch_x == 100
+        assert b.stretch_x == 300
+        assert b.scale_pct == 100
     finally:
         dialog._dirty = False
         dialog.close()
@@ -1200,7 +1209,9 @@ def test_scale_on_rotated_item_pins_opposite_corner(qapp, tmp_path):
             Qt.NoModifier,
         )
         box.commit()
-        assert item.scale_pct == 200
+        assert item.scale_pct == 100
+        assert item.stretch_x == 200
+        assert item.stretch_y == 200
         new_rect = dialog.scene._item_scene_rect(item)
         old_dist = ((center.x() - anchor.x()) ** 2 + (center.y() - anchor.y()) ** 2) ** 0.5
         new_center = new_rect.center()
@@ -1303,6 +1314,61 @@ def test_sync_panel_clamps_huge_offsets_into_spin_range(qapp, tmp_path):
         dialog._sync_panel()
         assert dialog.offset_x_spin.value() == dialog.offset_x_spin.maximum()
         assert dialog.offset_y_spin.value() == dialog.offset_y_spin.minimum()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_corner_scale_is_free_per_axis(qapp, tmp_path):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import Qt as QtCore
+
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        box = dialog.scene.transform_box
+        rect = dialog.scene._item_scene_rect(item)
+        anchor = rect.topLeft()
+        start = rect.bottomRight()
+        box.start("scale", "se", start)
+        end = QPointF(
+            anchor.x() + (start.x() - anchor.x()) * 1.5,
+            anchor.y() + (start.y() - anchor.y()) * 1.25,
+        )
+        box.update(end, QtCore.KeyboardModifier.NoModifier)
+        box.commit()
+        assert item.stretch_x == 150
+        assert item.stretch_y == 125
+        new_rect = dialog.scene._item_scene_rect(item)
+        assert abs(new_rect.topLeft().x() - anchor.x()) <= 1
+        assert abs(new_rect.topLeft().y() - anchor.y()) <= 1
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_corner_scale_with_shift_keeps_aspect_ratio(qapp, tmp_path):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import Qt as QtCore
+
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        box = dialog.scene.transform_box
+        rect = dialog.scene._item_scene_rect(item)
+        anchor = rect.topLeft()
+        start = rect.bottomRight()
+        box.start("scale", "se", start)
+        end = QPointF(
+            anchor.x() + (start.x() - anchor.x()) * 1.5,
+            anchor.y() + (start.y() - anchor.y()) * 1.5,
+        )
+        box.update(end, QtCore.KeyboardModifier.ShiftModifier)
+        box.commit()
+        assert item.stretch_x == item.stretch_y
+        assert item.stretch_x != 100
     finally:
         dialog._dirty = False
         dialog.close()
