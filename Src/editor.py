@@ -3,7 +3,7 @@ import os
 import queue
 import threading
 from enum import IntEnum
-from math import atan2, degrees
+from math import atan2, cos, degrees, radians, sin
 from pathlib import Path
 from time import time
 
@@ -120,6 +120,10 @@ SNAP_SPACING_GUIDE_COLOR = "#ff9500"
 CHECKER_PX = 8
 CHECKER_MIN_SCREEN_PX = 3
 CHECKER_TINT = 0.16
+
+MARQUEE_DASH = (4.0, 3.0)
+MARQUEE_ANT_MS = 120
+MARQUEE_CLICK_PX = 3
 BORDER_TINT = 0.35
 PASTEBOARD_TINT = 0.45
 GESTURE_UPDATE_MS = 16
@@ -769,6 +773,39 @@ class TransformBox:
             return []
         return [item for item in self._scene.ordered_selection() if item.isVisible()]
 
+    def _angle(self):
+        if self._multi or not self._items:
+            return 0.0
+        return float(self._items[0].rotation) % 360.0
+
+    @staticmethod
+    def _rotate_about(point, origin, angle):
+        rad = radians(angle)
+        cos_a = cos(rad)
+        sin_a = sin(rad)
+        dx = point.x() - origin.x()
+        dy = point.y() - origin.y()
+        return QPointF(
+            origin.x() + dx * cos_a - dy * sin_a,
+            origin.y() + dx * sin_a + dy * cos_a,
+        )
+
+    def _anchor_scene(self, rect, name, center, angle):
+        return self._rotate_about(self._anchor_point(rect, name), center, angle)
+
+    def _local_rect(self, item):
+        rect = self._scene._item_scene_rect(item)
+        angle = float(item.rotation) % 360.0
+        if not angle:
+            return QRectF(rect)
+        sprite = item.tinted_sprite()
+        factor_x = item.scale_pct * item.stretch_x / 10000.0
+        factor_y = item.scale_pct * item.stretch_y / 10000.0
+        width = max(1.0, sprite.width * factor_x)
+        height = max(1.0, sprite.height * factor_y)
+        center = rect.center()
+        return QRectF(center.x() - width / 2, center.y() - height / 2, width, height)
+
     @staticmethod
     def _anchor_point(rect, name):
         if name == "nw":
@@ -794,21 +831,38 @@ class TransformBox:
             return
         self._items = items
         self._multi = len(items) > 1
+        angle = self._angle()
         rect = self._scene._item_scene_rect(items[0])
         for item in items[1:]:
             rect = rect.united(self._scene._item_scene_rect(item))
+        if angle:
+            center = rect.center()
+            rect = self._local_rect(items[0])
+            rad = radians(angle)
+            cos_a = cos(rad)
+            sin_a = sin(rad)
+            rotation = QTransform(
+                cos_a, sin_a, -sin_a, cos_a, 0, 0
+            )
+            self._rect_item.setTransform(
+                QTransform.fromTranslate(-center.x(), -center.y())
+                * rotation
+                * QTransform.fromTranslate(center.x(), center.y())
+            )
+        else:
+            self._rect_item.setTransform(QTransform())
         self._rect_item.setRect(rect)
         self._rect_item.show()
         hs = HANDLE_PX / self._zoom()
         for name in self.NAMES:
-            center = self._anchor_point(rect, name)
+            center = self._anchor_scene(rect, name, rect.center(), angle)
             self._handles[name].setRect(
                 QRectF(center.x() - hs / 2, center.y() - hs / 2, hs, hs)
             )
             self._handles[name].show()
         rs = HANDLE_ROTATE_RING_PX / self._zoom()
         for name in self.CORNERS:
-            center = self._anchor_point(rect, name)
+            center = self._anchor_scene(rect, name, rect.center(), angle)
             self._rotate_zones[name].setRect(
                 QRectF(center.x() - rs / 2, center.y() - rs / 2, rs, rs)
             )
@@ -817,6 +871,7 @@ class TransformBox:
     def hide(self):
         self._items = []
         self._multi = False
+        self._rect_item.setTransform(QTransform())
         self._rect_item.hide()
         for handle in self._handles.values():
             handle.hide()
@@ -827,12 +882,17 @@ class TransformBox:
         if not self._items or self._gesture is not None:
             return None
         rect = self._rect_item.rect()
+        center = rect.center()
+        angle = self._angle()
+        local_pos = (
+            self._rotate_about(scene_pos, center, -angle) if angle else scene_pos
+        )
         hs = HANDLE_PX / self._zoom() / 2
         for name in self.NAMES:
-            center = self._anchor_point(rect, name)
+            center_local = self._anchor_point(rect, name)
             if (
-                abs(scene_pos.x() - center.x()) <= hs
-                and abs(scene_pos.y() - center.y()) <= hs
+                abs(local_pos.x() - center_local.x()) <= hs
+                and abs(local_pos.y() - center_local.y()) <= hs
             ):
                 if name in self.CORNERS:
                     return "scale", name
@@ -841,10 +901,10 @@ class TransformBox:
             return None
         rs = HANDLE_ROTATE_RING_PX / self._zoom() / 2
         for name in self.CORNERS:
-            center = self._anchor_point(rect, name)
+            center_local = self._anchor_point(rect, name)
             if (
-                abs(scene_pos.x() - center.x()) <= rs
-                and abs(scene_pos.y() - center.y()) <= rs
+                abs(local_pos.x() - center_local.x()) <= rs
+                and abs(local_pos.y() - center_local.y()) <= rs
             ):
                 return "rotate", name
         return None
@@ -861,6 +921,7 @@ class TransformBox:
             "name": name,
             "start_pos": QPointF(scene_pos),
             "rect": QRectF(self._rect_item.rect()),
+            "angle": self._angle(),
             "items": {
                 item: {
                     "scale": item.scale_pct,
@@ -968,7 +1029,12 @@ class TransformBox:
     def _update_scale(self, scene_pos, modifiers):
         gesture = self._gesture
         rect = gesture["rect"]
-        anchor = self._anchor_point(rect, OPPOSITE_CORNER[gesture["name"]])
+        anchor = self._anchor_scene(
+            rect,
+            OPPOSITE_CORNER[gesture["name"]],
+            rect.center(),
+            gesture["angle"],
+        )
         start_dist = self._distance(gesture["start_pos"], anchor)
         if start_dist < 1e-6:
             return
@@ -996,47 +1062,59 @@ class TransformBox:
         gesture = self._gesture
         name = gesture["name"]
         rect = gesture["rect"]
-        single = len(gesture["items"]) == 1
+        angle = gesture["angle"]
+        anchor_local = self._anchor_point(rect, OPPOSITE_EDGE[name])
+        anchor_scene = self._rotate_about(anchor_local, rect.center(), angle)
+        rad = radians(angle)
         if name in ("e", "w"):
-            anchor_x = rect.left() if name == "e" else rect.right()
-            span = gesture["start_pos"].x() - anchor_x
-            if abs(span) < 1e-6:
-                return
-            factor = self._limit_factor(
-                (scene_pos.x() - anchor_x) / span, "stretch_x"
-            )
-            for item, initial in gesture["items"].items():
-                stretch = round(initial["stretch_x"] * factor)
-                if single and not (modifiers & SNAP_DISABLED_MODIFIER):
-                    stretch = self._snap_stretch(stretch)
-                item.stretch_x = stretch
-                item.update_pixmap()
-                effective = stretch / initial["stretch_x"]
-                top = initial["rect"].topLeft()
-                item.dx = round(
-                    anchor_x + (top.x() - anchor_x) * effective - item.base_x
-                )
-                item._place()
+            attr = "stretch_x"
+            dir_x, dir_y = cos(rad), sin(rad)
         else:
-            anchor_y = rect.top() if name == "s" else rect.bottom()
-            span = gesture["start_pos"].y() - anchor_y
-            if abs(span) < 1e-6:
-                return
-            factor = self._limit_factor(
-                (scene_pos.y() - anchor_y) / span, "stretch_y"
+            attr = "stretch_y"
+            dir_x, dir_y = -sin(rad), cos(rad)
+
+        def projection(point):
+            dx = point.x() - anchor_scene.x()
+            dy = point.y() - anchor_scene.y()
+            return dx * dir_x + dy * dir_y
+
+        span = projection(gesture["start_pos"])
+        if abs(span) < 1e-6:
+            return
+        factor = self._limit_factor(projection(scene_pos) / span, attr)
+        single = len(gesture["items"]) == 1
+        for item, initial in gesture["items"].items():
+            stretch = round(initial[attr] * factor)
+            if single and not (modifiers & SNAP_DISABLED_MODIFIER):
+                stretch = self._snap_stretch(stretch)
+            setattr(item, attr, stretch)
+            item.update_pixmap()
+            effective = stretch / initial[attr]
+            if angle:
+                top_local = rect.topLeft()
+                size_w, size_h = rect.width(), rect.height()
+            else:
+                top_local = initial["rect"].topLeft()
+                size_w, size_h = initial["rect"].width(), initial["rect"].height()
+            if attr == "stretch_x":
+                new_x = anchor_local.x() + (top_local.x() - anchor_local.x()) * effective
+                new_y = top_local.y()
+                center_local = QPointF(new_x + size_w * effective / 2, new_y + size_h / 2)
+            else:
+                new_x = top_local.x()
+                new_y = anchor_local.y() + (top_local.y() - anchor_local.y()) * effective
+                center_local = QPointF(new_x + size_w / 2, new_y + size_h * effective / 2)
+            delta = center_local - anchor_local
+            scene_center = self._rotate_about(
+                anchor_scene + delta, anchor_scene, angle
             )
-            for item, initial in gesture["items"].items():
-                stretch = round(initial["stretch_y"] * factor)
-                if single and not (modifiers & SNAP_DISABLED_MODIFIER):
-                    stretch = self._snap_stretch(stretch)
-                item.stretch_y = stretch
-                item.update_pixmap()
-                effective = stretch / initial["stretch_y"]
-                top = initial["rect"].topLeft()
-                item.dy = round(
-                    anchor_y + (top.y() - anchor_y) * effective - item.base_y
-                )
-                item._place()
+            item.dx = round(
+                scene_center.x() - item.pixmap().width() / 2 - item.base_x
+            )
+            item.dy = round(
+                scene_center.y() - item.pixmap().height() / 2 - item.base_y
+            )
+            item._place()
 
     @staticmethod
     def _distance(a, b):
@@ -1044,6 +1122,7 @@ class TransformBox:
 
 
 OPPOSITE_CORNER = {"nw": "se", "ne": "sw", "se": "nw", "sw": "ne"}
+OPPOSITE_EDGE = {"e": "w", "w": "e", "n": "s", "s": "n"}
 
 
 class EditorScene(QGraphicsScene):
@@ -1060,7 +1139,91 @@ class EditorScene(QGraphicsScene):
         self._selection_order = []
         self._checker_key = None
         self._checker_cache = None
+        self._band_start = None
+        self._ant_offset = 0.0
+        self._band = QGraphicsRectItem()
+        pen = QPen(QApplication.palette().color(QPalette.ColorRole.Text), 0)
+        pen.setCosmetic(True)
+        pen.setDashPattern(MARQUEE_DASH)
+        self._band.setPen(pen)
+        fill = QApplication.palette().color(QPalette.ColorRole.Highlight)
+        fill.setAlpha(40)
+        self._band.setBrush(fill)
+        self._band.setZValue(1002)
+        self._band.hide()
+        self.addItem(self._band)
+        self._ant_timer = QTimer(self)
+        self._ant_timer.setInterval(MARQUEE_ANT_MS)
+        self._ant_timer.timeout.connect(self._march_ants)
         self.transform_box = TransformBox(self)
+
+    def _march_ants(self):
+        self._ant_offset = (self._ant_offset + 1) % (MARQUEE_DASH[0] + MARQUEE_DASH[1])
+        pen = self._band.pen()
+        pen.setDashOffset(self._ant_offset)
+        self._band.setPen(pen)
+
+    def _marquee_target(self, scene_pos):
+        views = self.views()
+        transform = views[0].transform() if views else QTransform()
+        item = self.itemAt(scene_pos, transform)
+        return item if isinstance(item, CharItem) and item.isVisible() else None
+
+    def _start_marquee(self, event):
+        self._band_start = QPointF(event.scenePos())
+        self._band.setRect(self._band_start.x(), self._band_start.y(), 0, 0)
+        self._band.show()
+        self._ant_timer.start()
+        event.accept()
+
+    def _update_marquee(self, scene_pos):
+        self._band.setRect(QRectF(self._band_start, scene_pos).normalized())
+
+    def _finish_marquee(self, event):
+        self._band_start = None
+        rect = self._band.rect()
+        self._band.hide()
+        self._ant_timer.stop()
+        dialog = self.parent_dialog
+        if dialog is None:
+            return
+        views = self.views()
+        zoom = abs(views[0].transform().m11()) if views else 1.0
+        moved = (
+            rect.width() * zoom > MARQUEE_CLICK_PX
+            or rect.height() * zoom > MARQUEE_CLICK_PX
+        )
+        modifiers = event.modifiers()
+        if not moved:
+            if not modifiers:
+                for item in dialog.items:
+                    item.setSelected(False)
+                    dialog._sync_panel()
+            return
+        hits = [
+            item
+            for item in dialog.items
+            if item.isVisible() and item.sceneBoundingRect().intersects(rect)
+        ]
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            for item in hits:
+                item.setSelected(True)
+        elif modifiers & Qt.KeyboardModifier.AltModifier:
+            for item in hits:
+                item.setSelected(False)
+        else:
+            for item in dialog.items:
+                if item.isVisible():
+                    item.setSelected(item in hits)
+        dialog._sync_panel()
+
+    def cancel_marquee(self):
+        if self._band_start is None:
+            return False
+        self._band_start = None
+        self._band.hide()
+        self._ant_timer.stop()
+        return True
 
     def note_selection_change(self, item, selected):
         if selected:
@@ -1092,10 +1255,17 @@ class EditorScene(QGraphicsScene):
                     self.transform_box.start(kind, name, event.scenePos())
                     event.accept()
                     return
+            if self._marquee_target(event.scenePos()) is None:
+                self._start_marquee(event)
+                return
             self.drag_started.emit()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._band_start is not None:
+            self._update_marquee(event.scenePos())
+            event.accept()
+            return
         if self.transform_box._gesture is not None:
             self.transform_box.update(event.scenePos(), event.modifiers())
             event.accept()
@@ -1112,6 +1282,10 @@ class EditorScene(QGraphicsScene):
             self.parent_dialog._update_scene_rect()
 
     def mouseReleaseEvent(self, event):
+        if self._band_start is not None:
+            self._finish_marquee(event)
+            event.accept()
+            return
         if self.transform_box._gesture is not None:
             if event.button() == Qt.LeftButton:
                 self.transform_box.commit()
@@ -1318,7 +1492,7 @@ class EditorView(QGraphicsView):
 
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
-        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self._pan_start = None
@@ -1796,7 +1970,15 @@ Mouse
   and orange guides appear while dragging).
 - Hold Alt or Ctrl while dragging or transforming to suspend
   snapping.
-- Drag on empty space for a rubber-band selection.
+- Drag on empty space for an Aseprite-style marquee: the dashed
+  rectangle selects every character it touches. Hold Shift to
+  add to the selection and Alt to subtract from it. A plain
+  click on empty space clears the selection, Escape cancels a
+  marquee in progress.
+- With a rotated character selected, the transform box tilts
+  with it: the corner squares scale and the edge squares
+  stretch along the character's own axes, with the opposite
+  corner or edge staying pinned, exactly like Aseprite.
 - Ctrl+click adds characters to the selection.
 - Double-click a character to replace it with another one.
 - Right-click a character to reset its scale/rotation or delete it.
@@ -2305,6 +2487,8 @@ Panels
                 item.setSelected(True)
 
     def _escape_pressed(self):
+        if self.scene.cancel_marquee():
+            return
         selected = self._selected()
         if selected:
             for item in selected:
@@ -2551,8 +2735,8 @@ Panels
         try:
             if selected:
                 first = selected[0]
-                self.offset_x_spin.setValue(round(first.dx))
-                self.offset_y_spin.setValue(round(first.dy))
+                self._set_spin_clamped(self.offset_x_spin, round(first.dx))
+                self._set_spin_clamped(self.offset_y_spin, round(first.dy))
                 self.scale_slider.setValue(first.scale_pct)
                 self.scale_spin.setValue(first.scale_pct)
                 self.rotation_slider.setValue(first.rotation)
@@ -2713,6 +2897,9 @@ Panels
         self.hue_slider.setValue(value)
         self.hue_slider.blockSignals(False)
         self._apply_char_property("hue_shift", value)
+
+    def _set_spin_clamped(self, spin, value):
+        spin.setValue(max(spin.minimum(), min(spin.maximum(), value)))
 
     def _in_slider_gesture(self):
         return getattr(self, "_slider_undo_before", None) is not None

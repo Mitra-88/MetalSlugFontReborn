@@ -1,3 +1,5 @@
+from PySide6.QtCore import QPointF, Qt
+
 from editor import AdvancedEditorDialog
 from image_generation import get_font_charset
 
@@ -1114,6 +1116,193 @@ def test_z_order_front_back_with_undo_and_export(qapp, tmp_path):
         second.dx = first.dx + 5
         second.dy = first.dy + 5
         assert dialog.export_image() is True
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def _rotated_offset(angle_deg, dx, dy):
+    import math
+
+    rad = math.radians(angle_deg)
+    return QPointF(
+        dx * math.cos(rad) - dy * math.sin(rad),
+        dx * math.sin(rad) + dy * math.cos(rad),
+    )
+
+
+def test_transform_box_hit_works_rotated(qapp, tmp_path):
+
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        item.rotation = 90
+        item.update_pixmap()
+        box = dialog.scene.transform_box
+        rect = box._rect_item.rect()
+        center = rect.center()
+        corner = center + _rotated_offset(90, -rect.width() / 2, -rect.height() / 2)
+        assert box.hit(corner) == ("scale", "nw")
+        edge = center + _rotated_offset(90, 0, -rect.height() / 2)
+        assert box.hit(edge) == ("stretch", "n")
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_stretch_on_rotated_item_follows_item_axes(qapp, tmp_path):
+
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        item.rotation = 90
+        item.update_pixmap()
+        box = dialog.scene.transform_box
+        rect = box._rect_item.rect()
+        center = rect.center()
+        anchor = center + _rotated_offset(90, -rect.width() / 2, 0)
+        start = center + _rotated_offset(90, rect.width() / 2, 0)
+        box.start("stretch", "e", start)
+        box.update(
+            center + _rotated_offset(90, rect.width() * 1.5, 0), Qt.NoModifier
+        )
+        box.commit()
+        assert item.stretch_x == 200
+        new_rect = box._rect_item.rect()
+        new_anchor = new_rect.center() + _rotated_offset(
+            90, -new_rect.width() / 2, 0
+        )
+        assert abs(new_anchor.x() - anchor.x()) <= 1
+        assert abs(new_anchor.y() - anchor.y()) <= 1
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_scale_on_rotated_item_pins_opposite_corner(qapp, tmp_path):
+
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        item.rotation = 90
+        item.update_pixmap()
+        box = dialog.scene.transform_box
+        rect = box._rect_item.rect()
+        center = rect.center()
+        anchor = center + _rotated_offset(90, -rect.width() / 2, -rect.height() / 2)
+        start = center + _rotated_offset(90, rect.width() / 2, rect.height() / 2)
+        box.start("scale", "se", start)
+        box.update(
+            center + _rotated_offset(90, rect.width() * 1.5, rect.height() * 1.5),
+            Qt.NoModifier,
+        )
+        box.commit()
+        assert item.scale_pct == 200
+        new_rect = dialog.scene._item_scene_rect(item)
+        old_dist = ((center.x() - anchor.x()) ** 2 + (center.y() - anchor.y()) ** 2) ** 0.5
+        new_center = new_rect.center()
+        new_dist = (
+            (new_center.x() - anchor.x()) ** 2 + (new_center.y() - anchor.y()) ** 2
+        ) ** 0.5
+        assert abs(new_dist - 2 * old_dist) <= 1.5
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_marquee_selects_intersecting_characters(qapp, tmp_path):
+    from PySide6.QtTest import QTest
+
+    dialog = make_dialog(tmp_path)
+    try:
+        view = dialog.view
+        first, second = dialog.items[0], dialog.items[1]
+        second.dx += 200
+        second._place()
+        band_rect = first.sceneBoundingRect()
+        press_at = view.mapFromScene(
+            band_rect.topLeft() - QPointF(5, 5)
+        )
+        release_at = view.mapFromScene(band_rect.bottomRight() + QPointF(5, 5))
+        QTest.mousePress(
+            view.viewport(), Qt.LeftButton, pos=press_at
+        )
+        assert dialog.scene._band_start is not None
+        QTest.mouseMove(view.viewport(), release_at)
+        QTest.mouseRelease(view.viewport(), Qt.LeftButton, pos=release_at)
+        assert first.isSelected()
+        assert not second.isSelected()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_marquee_shift_adds_and_alt_subtracts(qapp, tmp_path):
+    from PySide6.QtTest import QTest
+
+    dialog = make_dialog(tmp_path)
+    try:
+        view = dialog.view
+        first, second = dialog.items[0], dialog.items[1]
+        second.dx += 200
+        second._place()
+        first.setSelected(True)
+
+        def drag_over(item, modifiers):
+            band = item.sceneBoundingRect()
+            press_at = view.mapFromScene(band.topLeft() - QPointF(5, 5))
+            release_at = view.mapFromScene(band.bottomRight() + QPointF(5, 5))
+            QTest.mousePress(view.viewport(), Qt.LeftButton, pos=press_at)
+            QTest.mouseMove(view.viewport(), release_at)
+            QTest.mouseRelease(view.viewport(), Qt.LeftButton, modifiers, release_at)
+
+        drag_over(second, Qt.KeyboardModifier.ShiftModifier)
+        assert first.isSelected() and second.isSelected()
+        drag_over(second, Qt.KeyboardModifier.AltModifier)
+        assert first.isSelected() and not second.isSelected()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_marquee_plain_click_clears_and_escape_cancels(qapp, tmp_path):
+    from PySide6.QtTest import QTest
+
+    dialog = make_dialog(tmp_path)
+    try:
+        view = dialog.view
+        dialog.items[0].setSelected(True)
+        empty = QPointF(
+            dialog.scene._background_bounds().left() - 80,
+            dialog.scene._background_bounds().center().y(),
+        )
+        pos = view.mapFromScene(empty)
+        QTest.mousePress(view.viewport(), Qt.LeftButton, pos=pos)
+        assert dialog.scene._band_start is not None
+        dialog._escape_pressed()
+        assert dialog.scene._band_start is None
+        QTest.mouseRelease(view.viewport(), Qt.LeftButton, pos=pos)
+        QTest.mousePress(view.viewport(), Qt.LeftButton, pos=pos)
+        QTest.mouseRelease(view.viewport(), Qt.LeftButton, pos=pos)
+        assert not dialog.items[0].isSelected()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_sync_panel_clamps_huge_offsets_into_spin_range(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        item.dx = 2_470_000_000
+        item.dy = -2_470_000_000
+        dialog._sync_panel()
+        assert dialog.offset_x_spin.value() == dialog.offset_x_spin.maximum()
+        assert dialog.offset_y_spin.value() == dialog.offset_y_spin.minimum()
     finally:
         dialog._dirty = False
         dialog.close()
