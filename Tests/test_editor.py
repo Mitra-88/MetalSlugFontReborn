@@ -811,20 +811,59 @@ def test_undo_blocked_during_slider_gesture(qapp, tmp_path):
         dialog.close()
 
 
-def test_zoom_below_minimum_moves_continuously(qapp, tmp_path):
-    from PySide6.QtGui import QTransform
+def test_view_zoom_steps_through_aseprite_ladder(qapp, tmp_path):
+    from editor import ZOOM_SCALES
 
     dialog = make_dialog(tmp_path)
     try:
         view = dialog.view
-        view.setTransform(QTransform().scale(0.04, 0.04))
-        view.zoom_by(1.15)
-        assert abs(view.transform().m11() - 0.046) < 1e-9
-        for _ in range(20):
-            view.zoom_by(1.15)
-            if view.transform().m11() >= 0.1:
-                break
-        assert view.transform().m11() == 0.1
+        view.zoom_to(1.0)
+        view.zoom_in()
+        assert view.transform().m11() == 2.0
+        view.zoom_out()
+        assert view.transform().m11() == 1.0
+        for _ in range(40):
+            view.zoom_out()
+        assert view.transform().m11() == ZOOM_SCALES[0]
+        for _ in range(80):
+            view.zoom_in()
+        assert view.transform().m11() == ZOOM_SCALES[-1]
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_zoom_entry_snaps_input_to_nearest_preset(qapp, tmp_path):
+    from editor import ZOOM_SCALES
+
+    dialog = make_dialog(tmp_path)
+    try:
+        entry = dialog.zoom_entry
+        entry.setText("33%")
+        entry._commit()
+        assert abs(dialog.view.transform().m11() - ZOOM_SCALES[10]) < 1e-9
+        entry.setText("9999")
+        entry._commit()
+        assert dialog.view.transform().m11() == ZOOM_SCALES[-1]
+        entry.setText("nonsense")
+        entry._commit()
+        assert entry.text() == f"{round(ZOOM_SCALES[-1] * 100)}%"
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_escape_clears_selection_before_closing(qapp, tmp_path, monkeypatch):
+    dialog = make_dialog(tmp_path)
+    try:
+        dialog.items[0].setSelected(True)
+        rejects = []
+        monkeypatch.setattr(dialog, "reject", lambda: rejects.append(True))
+        dialog._escape_pressed()
+        assert rejects == []
+        assert not dialog.items[0].isSelected()
+        dialog._escape_pressed()
+        assert rejects == [True]
     finally:
         dialog._dirty = False
         dialog.close()

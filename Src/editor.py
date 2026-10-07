@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QMenu,
     QMessageBox,
     QPushButton,
@@ -43,6 +44,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStyle,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -68,9 +70,11 @@ PANEL_WIDTH = 330
 CANVAS_MIN_WIDTH = 200
 SCENE_PADDING = 60
 
-ZOOM_STEP = 1.15
-ZOOM_MIN_FACTOR = 0.1
-ZOOM_MAX_FACTOR = 8.0
+ZOOM_SCALES = (
+    1 / 64, 1 / 48, 1 / 32, 1 / 24, 1 / 16, 1 / 12, 1 / 8, 1 / 6, 1 / 5,
+    1 / 4, 1 / 3, 1 / 2, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 12.0, 16.0,
+    24.0, 32.0, 48.0, 64.0,
+)
 
 CHAR_SCALE_MIN = 10
 CHAR_SCALE_MAX = 400
@@ -1225,20 +1229,30 @@ class EditorView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self._pan_start = None
+        self._pan_button = None
+        self._space_pan = False
 
-    def zoom_by(self, factor):
+    def zoom_to(self, scale):
         current = self.transform().m11()
-        target = current * factor
-        if current < ZOOM_MIN_FACTOR:
-            target = min(target, ZOOM_MIN_FACTOR)
-        elif current > ZOOM_MAX_FACTOR:
-            target = max(target, ZOOM_MAX_FACTOR)
-        else:
-            target = max(ZOOM_MIN_FACTOR, min(ZOOM_MAX_FACTOR, target))
-        if abs(target - current) < 1e-9:
+        scale = max(ZOOM_SCALES[0], min(ZOOM_SCALES[-1], scale))
+        if abs(scale - current) < 1e-9:
             return
-        self.setTransform(self.transform().scale(target / current, target / current))
+        self.setTransform(self.transform().scale(scale / current, scale / current))
         self.zoom_changed.emit(self.transform().m11())
+
+    def zoom_in(self):
+        current = self.transform().m11()
+        for scale in ZOOM_SCALES:
+            if scale > current + 1e-9:
+                self.zoom_to(scale)
+                return
+
+    def zoom_out(self):
+        current = self.transform().m11()
+        for scale in reversed(ZOOM_SCALES):
+            if scale < current - 1e-9:
+                self.zoom_to(scale)
+                return
 
     def wheelEvent(self, event):
         delta = event.angleDelta()
@@ -1247,14 +1261,41 @@ class EditorView(QGraphicsView):
             bar.setValue(bar.value() - delta.y())
             event.accept()
         elif delta.y():
-            self.zoom_by(ZOOM_STEP if delta.y() > 0 else 1 / ZOOM_STEP)
+            if delta.y() > 0:
+                self.zoom_in()
+            else:
+                self.zoom_out()
             event.accept()
         else:
             super().wheelEvent(event)
 
+    def keyPressEvent(self, event):
+        if (
+            event.key() == Qt.Key.Key_Space
+            and not event.modifiers()
+            and not self._space_pan
+        ):
+            self._space_pan = True
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key.Key_Space and self._space_pan:
+            self._space_pan = False
+            self.setCursor(Qt.CursorShape.ClosedHandCursor if self._pan_start is not None else Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
     def mousePressEvent(self, event):
-        if event.button() == Qt.MiddleButton:
+        if self._pan_start is None and (
+            event.button() == Qt.MiddleButton
+            or (event.button() == Qt.LeftButton and self._space_pan)
+        ):
             self._pan_start = event.position()
+            self._pan_button = event.button()
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
         else:
@@ -1275,12 +1316,50 @@ class EditorView(QGraphicsView):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MiddleButton:
+        if self._pan_start is not None and event.button() == self._pan_button:
             self._pan_start = None
-            self.setCursor(Qt.ArrowCursor)
+            self._pan_button = None
+            self.setCursor(
+                Qt.OpenHandCursor if self._space_pan else Qt.ArrowCursor
+            )
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+
+class ZoomEntry(QLineEdit):
+    zoom_committed = Signal(float)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ZoomEntry")
+        self.setReadOnly(False)
+        self.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.setMinimumWidth(
+            self.fontMetrics().horizontalAdvance("99999%") + 16
+        )
+        self.setToolTip("Zoom level: type a percentage and press Enter.")
+        self.setAccessibleName("Zoom level")
+        self.editingFinished.connect(self._commit)
+        self._last = 1.0
+        self.set_zoom(1.0)
+
+    def set_zoom(self, scale):
+        self._last = scale
+        if self.hasFocus():
+            return
+        self.setText(f"{round(scale * 100)}%")
+
+    def _commit(self):
+        text = self.text().strip().rstrip("%").strip()
+        try:
+            percent = float(text)
+        except ValueError:
+            self.set_zoom(self._last)
+            return
+        scale = max(ZOOM_SCALES[0], min(ZOOM_SCALES[-1], percent / 100))
+        nearest = min(ZOOM_SCALES, key=lambda entry: abs(entry - scale))
+        self.zoom_committed.emit(nearest)
 
 
 class UndoStack:
@@ -1401,11 +1480,14 @@ class AdvancedEditorDialog(QDialog):
         if not self._fitted:
             self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
             self._fitted = True
-        self.status_zoom_label.setText(self._zoom_text())
+        self.zoom_entry.set_zoom(self.view.transform().m11())
         self.view.setFocus()
 
     def _build_ui(self):
         outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(self._build_toolbar())
         splitter = QSplitter(Qt.Horizontal, self)
         outer.addWidget(splitter, 1)
         outer.addWidget(self._build_status_bar())
@@ -1426,14 +1508,6 @@ class AdvancedEditorDialog(QDialog):
         panel_layout.addWidget(self._build_character_group())
         panel_layout.addWidget(self._build_global_group())
 
-        self.export_btn = QPushButton("Save Image")
-        self.export_btn.setToolTip(
-            "Render the edited composition and save it with the main "
-            "window's compression and scale settings (Ctrl+S)."
-        )
-        self.export_btn.clicked.connect(self.export_image)
-        panel_layout.addWidget(self.export_btn)
-
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setToolTip("Discard all changes and close the editor.")
         cancel_btn.clicked.connect(self.reject)
@@ -1452,12 +1526,12 @@ class AdvancedEditorDialog(QDialog):
             (self.letter_spacing_spin, self.line_spacing_spin),
             (self.line_spacing_spin, self.baseline_combo),
             (self.baseline_combo, self.align_combo),
-            (self.align_combo, self.export_btn),
-            (self.export_btn, cancel_btn),
+            (self.align_combo, cancel_btn),
         ):
             self.setTabOrder(first, second)
 
         self._fit_panel(splitter, panel_scroll, panel)
+        self._apply_chrome_style()
 
     def _fit_panel(self, splitter, scroll, content):
         chrome = scroll.frameWidth() * 2 + self.style().pixelMetric(
@@ -1467,63 +1541,145 @@ class AdvancedEditorDialog(QDialog):
         share = min(EDITOR_DEFAULT_WIDTH - CANVAS_MIN_WIDTH, scroll.minimumWidth())
         splitter.setSizes([EDITOR_DEFAULT_WIDTH - share, share])
 
+    def _toolbar_button(self, layout, text, tip, slot, accessible=None):
+        button = QToolButton()
+        button.setText(text)
+        button.setToolTip(tip)
+        button.clicked.connect(slot)
+        if accessible:
+            button.setAccessibleName(accessible)
+        layout.addWidget(button)
+        return button
+
+    def _toolbar_separator(self, layout):
+        line = QFrame()
+        line.setObjectName("ToolbarSeparator")
+        line.setFixedWidth(1)
+        line.setStyleSheet("background: rgba(128, 128, 128, 90); border: none;")
+        layout.addWidget(line)
+
+    def _build_toolbar(self):
+        bar = QWidget()
+        bar.setObjectName("EditorToolbar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
+        self.undo_btn = self._toolbar_button(
+            layout, "Undo", "Undo the last edit (Ctrl+Z).", self._undo
+        )
+        self.redo_btn = self._toolbar_button(
+            layout, "Redo", "Re-apply the last undone edit (Ctrl+Y).", self._redo
+        )
+        self._toolbar_separator(layout)
+        self.zoom_out_btn = self._toolbar_button(
+            layout,
+            "−",
+            "Zoom out (also: mouse wheel down, Ctrl+-).",
+            self.view.zoom_out,
+            "Zoom out",
+        )
+        self.zoom_out_btn.setFixedWidth(28)
+        self.zoom_in_btn = self._toolbar_button(
+            layout,
+            "+",
+            "Zoom in (also: mouse wheel up, Ctrl+=).",
+            self.view.zoom_in,
+            "Zoom in",
+        )
+        self.zoom_in_btn.setFixedWidth(28)
+        self.fit_btn = self._toolbar_button(
+            layout, "Fit", "Zoom so the whole image is visible (Ctrl+0).", self._fit_view
+        )
+        self.actual_size_btn = self._toolbar_button(
+            layout, "1:1", "Reset the zoom to 100% (Ctrl+1).", self._zoom_actual
+        )
+        layout.addStretch()
+        self.help_btn = self._toolbar_button(
+            layout,
+            "?",
+            "How the editor works: mouse actions, keys, snapping.",
+            self._show_help,
+            "Editor help",
+        )
+        self.help_btn.setFixedWidth(28)
+        self.export_btn = self._toolbar_button(
+            layout,
+            "Save Image",
+            "Render the edited composition and save it with the main "
+            "window's compression and scale settings (Ctrl+S).",
+            self.export_image,
+        )
+        self.undo_btn.setEnabled(False)
+        self.redo_btn.setEnabled(False)
+        return bar
+
     def _build_status_bar(self):
         bar = QWidget()
+        bar.setObjectName("EditorStatusBar")
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(8, 2, 8, 2)
-        self.status_chars_label = QLabel()
+        layout.setContentsMargins(8, 3, 8, 3)
+        layout.setSpacing(10)
         self.status_selection_label = QLabel()
-        self.status_canvas_label = QLabel()
-        self.status_zoom_label = QLabel()
+        self.status_chars_label = QLabel()
         self.status_dirty_label = QLabel()
         for label in (
-            self.status_chars_label,
             self.status_selection_label,
-            self.status_canvas_label,
-            self.status_zoom_label,
+            self.status_chars_label,
             self.status_dirty_label,
         ):
             layout.addWidget(label)
         layout.addStretch()
-
-        self.undo_btn = QPushButton("Undo")
-        self.undo_btn.setToolTip("Undo the last edit (Ctrl+Z).")
-        self.undo_btn.clicked.connect(self._undo)
-        layout.addWidget(self.undo_btn)
-
-        self.redo_btn = QPushButton("Redo")
-        self.redo_btn.setToolTip("Re-apply the last undone edit (Ctrl+Y).")
-        self.redo_btn.clicked.connect(self._redo)
-        layout.addWidget(self.redo_btn)
-
-        self.zoom_out_btn = QPushButton("−")
-        self.zoom_out_btn.setFixedWidth(28)
-        self.zoom_out_btn.setAccessibleName("Zoom out")
-        self.zoom_out_btn.setToolTip("Zoom out (also: mouse wheel down, Ctrl+-).")
-        self.zoom_out_btn.clicked.connect(lambda: self.view.zoom_by(1 / ZOOM_STEP))
-        layout.addWidget(self.zoom_out_btn)
-
-        self.zoom_in_btn = QPushButton("+")
-        self.zoom_in_btn.setFixedWidth(28)
-        self.zoom_in_btn.setAccessibleName("Zoom in")
-        self.zoom_in_btn.setToolTip("Zoom in (also: mouse wheel up, Ctrl+=).")
-        self.zoom_in_btn.clicked.connect(lambda: self.view.zoom_by(ZOOM_STEP))
-        layout.addWidget(self.zoom_in_btn)
-
-        self.fit_btn = QPushButton("Fit")
-        self.fit_btn.setToolTip("Zoom so the whole image is visible (Ctrl+0).")
-        self.fit_btn.clicked.connect(self._fit_view)
-        layout.addWidget(self.fit_btn)
-
-        self.help_btn = QPushButton("?")
-        self.help_btn.setFixedWidth(28)
-        self.help_btn.setAccessibleName("Editor help")
-        self.help_btn.setToolTip("How the editor works: mouse actions, keys, snapping.")
-        self.help_btn.clicked.connect(self._show_help)
-        layout.addWidget(self.help_btn)
-
+        self.status_canvas_label = QLabel()
+        layout.addWidget(self.status_canvas_label)
+        self.zoom_entry = ZoomEntry()
+        self.zoom_entry.zoom_committed.connect(self.view.zoom_to)
+        layout.addWidget(self.zoom_entry)
         self._update_status_counts()
         return bar
+
+    def _apply_chrome_style(self):
+        palette = QApplication.palette()
+        base = palette.color(QPalette.ColorRole.Window)
+        field = palette.color(QPalette.ColorRole.Base)
+        text = palette.color(QPalette.ColorRole.Text)
+        shadow = palette.color(QPalette.ColorRole.Shadow)
+        hover = _blend(base, text, 0.12).name()
+        pressed = _blend(base, text, 0.22).name()
+        border = _blend(base, shadow, 0.4).name()
+        self.setStyleSheet(
+            f"""
+            QWidget#EditorToolbar {{
+                background: {base.name()};
+                border-bottom: 1px solid {border};
+            }}
+            QWidget#EditorStatusBar {{
+                background: {base.name()};
+                border-top: 1px solid {border};
+            }}
+            QWidget#EditorToolbar QToolButton {{
+                border: none;
+                border-radius: 4px;
+                padding: 4px 10px;
+                background: transparent;
+            }}
+            QWidget#EditorToolbar QToolButton:hover {{
+                background: {hover};
+            }}
+            QWidget#EditorToolbar QToolButton:pressed {{
+                background: {pressed};
+            }}
+            QWidget#EditorToolbar QToolButton:disabled {{
+                color: {shadow.name()};
+            }}
+            QLineEdit#ZoomEntry {{
+                background: {field.name()};
+                color: {text.name()};
+                border: 1px solid {border};
+                border-radius: 4px;
+                padding: 1px 6px;
+            }}
+            """
+        )
 
     HELP_TEXT = """\
 Mouse
@@ -1546,16 +1702,20 @@ Mouse
 - Ctrl+click adds characters to the selection.
 - Double-click a character to replace it with another one.
 - Right-click a character to reset its scale/rotation or delete it.
-- Mouse wheel zooms, Shift + wheel scrolls sideways,
-  middle-button drag pans the view.
+- Mouse wheel zooms through preset steps, Shift + wheel scrolls
+  sideways, middle-button drag or holding Space pans the view.
 
 Keys
 
 - Arrow keys nudge the selection, Shift + Arrow nudges by 10.
-- Ctrl+A selects every visible character, Delete removes the
-  selected ones.
+- Ctrl+A selects every visible character, Escape clears the
+  selection (or closes the editor when nothing is selected),
+  Delete removes the selected ones.
 - Ctrl+Z / Ctrl+Y undo and redo, Ctrl+S saves the image.
-- Ctrl+= / Ctrl+- zoom in and out, Ctrl+0 fits the view.
+- Ctrl+= / Ctrl+- zoom in and out through the preset steps,
+  Ctrl+0 fits the view, Ctrl+1 resets to 100%.
+- Type a percentage into the zoom box in the status bar and
+  press Enter to snap the zoom to the closest preset.
 
 Panels
 
@@ -1572,10 +1732,10 @@ Panels
 
     def _fit_view(self):
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
-        self.status_zoom_label.setText(self._zoom_text())
+        self.zoom_entry.set_zoom(self.view.transform().m11())
 
-    def _zoom_text(self):
-        return f"Zoom: {self.view.transform().m11() * 100:.0f}%"
+    def _zoom_actual(self):
+        self.view.zoom_to(1.0)
 
     def _update_status_counts(self):
         visible = sum(1 for it in self.items if it.isVisible())
@@ -1588,7 +1748,7 @@ Panels
         self.status_canvas_label.setText(
             f"Canvas: {round(canvas_w)} x {round(canvas_h)}"
         )
-        self.status_zoom_label.setText(self._zoom_text())
+        self.zoom_entry.set_zoom(self.view.transform().m11())
         self.status_dirty_label.setText("Unsaved edits" if self._dirty else "")
         self.undo_btn.setEnabled(self.undo_stack.can_undo())
         self.redo_btn.setEnabled(self.undo_stack.can_redo())
@@ -1908,11 +2068,16 @@ Panels
         del_sc.activated.connect(self._delete_selected)
 
         zoom_in_sc = QShortcut(QKeySequence("Ctrl+="), self)
-        zoom_in_sc.activated.connect(lambda: self.view.zoom_by(ZOOM_STEP))
+        zoom_in_sc.activated.connect(self.view.zoom_in)
         zoom_out_sc = QShortcut(QKeySequence("Ctrl+-"), self)
-        zoom_out_sc.activated.connect(lambda: self.view.zoom_by(1 / ZOOM_STEP))
+        zoom_out_sc.activated.connect(self.view.zoom_out)
         fit_sc = QShortcut(QKeySequence("Ctrl+0"), self)
         fit_sc.activated.connect(self._fit_view)
+        actual_sc = QShortcut(QKeySequence("Ctrl+1"), self)
+        actual_sc.activated.connect(self._zoom_actual)
+        escape_sc = QShortcut(QKeySequence("Escape"), self.view)
+        escape_sc.setContext(Qt.ShortcutContext.WidgetShortcut)
+        escape_sc.activated.connect(self._escape_pressed)
 
         select_all_sc = QShortcut(QKeySequence.StandardKey.SelectAll, self)
         select_all_sc.activated.connect(self._select_all)
@@ -1949,6 +2114,14 @@ Panels
         for item in self.items:
             if item.isVisible():
                 item.setSelected(True)
+
+    def _escape_pressed(self):
+        selected = self._selected()
+        if selected:
+            for item in selected:
+                item.setSelected(False)
+        else:
+            self.reject()
 
     def _flip_selection(self, axis):
         selected = [item for item in self._selected() if item.isVisible()]
@@ -2049,12 +2222,13 @@ Panels
         QApplication.instance().paletteChanged.connect(self._on_palette_changed)
 
     def _on_palette_changed(self, _palette):
+        self._apply_chrome_style()
         self.scene.invalidate(
             self.scene.sceneRect(), QGraphicsScene.SceneLayer.BackgroundLayer
         )
 
     def _on_zoom_changed(self, _factor):
-        self.status_zoom_label.setText(self._zoom_text())
+        self.zoom_entry.set_zoom(self.view.transform().m11())
         self.scene.transform_box.refresh()
 
     def _selected(self):
