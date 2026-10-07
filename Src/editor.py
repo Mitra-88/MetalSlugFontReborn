@@ -1152,13 +1152,7 @@ class EditorScene(QGraphicsScene):
         self._band_start = None
         self._ant_offset = 0.0
         self._band = QGraphicsRectItem()
-        pen = QPen(QApplication.palette().color(QPalette.ColorRole.Text), 0)
-        pen.setCosmetic(True)
-        pen.setDashPattern(MARQUEE_DASH)
-        self._band.setPen(pen)
-        fill = QApplication.palette().color(QPalette.ColorRole.Highlight)
-        fill.setAlpha(40)
-        self._band.setBrush(fill)
+        self._apply_band_palette()
         self._band.setZValue(1002)
         self._band.hide()
         self.addItem(self._band)
@@ -1166,6 +1160,17 @@ class EditorScene(QGraphicsScene):
         self._ant_timer.setInterval(MARQUEE_ANT_MS)
         self._ant_timer.timeout.connect(self._march_ants)
         self.transform_box = TransformBox(self)
+
+    def _apply_band_palette(self):
+        pen = QPen(QApplication.palette().color(QPalette.ColorRole.Text), 0)
+        pen.setCosmetic(True)
+        pen.setDashPattern(MARQUEE_DASH)
+        if self._band.pen().style() == Qt.PenStyle.DashLine:
+            pen.setDashOffset(self._band.pen().dashOffset())
+        self._band.setPen(pen)
+        fill = QApplication.palette().color(QPalette.ColorRole.Highlight)
+        fill.setAlpha(40)
+        self._band.setBrush(fill)
 
     def _march_ants(self):
         self._ant_offset = (self._ant_offset + 1) % (MARQUEE_DASH[0] + MARQUEE_DASH[1])
@@ -2669,6 +2674,7 @@ Panels
 
     def _on_palette_changed(self, _palette):
         self._apply_chrome_style()
+        self.scene._apply_band_palette()
         self.scene.invalidate(
             self.scene.sceneRect(), QGraphicsScene.SceneLayer.BackgroundLayer
         )
@@ -3349,6 +3355,13 @@ Panels
             return False
         try:
             summary = self._export_image()
+        except Image.DecompressionBombError as e:
+            QMessageBox.critical(
+                self,
+                "Export Too Large",
+                f"The edited composition is too large to export:\n{e}",
+            )
+            return False
         except OSError as e:
             QMessageBox.critical(
                 self,
@@ -3356,6 +3369,8 @@ Panels
                 f"The image could not be saved:\n{e}\n\n"
                 "Check that the save location exists and is writable.",
             )
+            return False
+        if not summary:
             return False
         self._dirty = False
         self._exported_signature = self._capture_all()
@@ -3402,7 +3417,20 @@ Panels
         if not placed:
             canvas = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
         else:
-            canvas = Image.new("RGBA", (max_x - min_x, max_y - min_y), (0, 0, 0, 0))
+            width = max_x - min_x
+            height = max_y - min_y
+            scale = self.params.get("scale", 1) or 1
+            if width * height * scale * scale > Image.MAX_IMAGE_PIXELS:
+                QMessageBox.warning(
+                    self,
+                    "Export Too Large",
+                    f"The composition spans {width} x {height} pixels "
+                    f"({width * scale} x {height * scale} after scaling), "
+                    "which is beyond what an image may hold. Move the "
+                    "characters closer together or lower the scale.",
+                )
+                return ""
+            canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             for pil_img, x, y in placed:
                 canvas.alpha_composite(pil_img, (x - min_x, y - min_y))
             bbox = canvas.getbbox()

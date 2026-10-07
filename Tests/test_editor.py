@@ -1372,3 +1372,23 @@ def test_corner_scale_with_shift_keeps_aspect_ratio(qapp, tmp_path):
     finally:
         dialog._dirty = False
         dialog.close()
+
+
+def test_export_refuses_absurd_compositions_with_warning(qapp, tmp_path, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        "editor.QMessageBox.warning",
+        lambda parent, title, text: warnings.append((title, text)),
+    )
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.dx = 100000
+        item.dy = 100000
+        assert dialog.export_image() is False
+        assert len(warnings) == 1
+        assert warnings[0][0] == "Export Too Large"
+        assert not list(tmp_path.iterdir())
+    finally:
+        dialog._dirty = False
+        dialog.close()
