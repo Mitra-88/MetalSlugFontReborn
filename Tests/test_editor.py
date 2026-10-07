@@ -923,3 +923,63 @@ def test_dialog_destroy_under_pending_renders_does_not_abort(qapp, tmp_path):
     del dialog
     gc.collect()
     qapp.processEvents()
+
+
+def test_space_drag_pans_the_view(qapp, tmp_path):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    dialog = make_dialog(tmp_path)
+    try:
+        view = dialog.view
+        view.zoom_to(4.0)
+        h0 = view.horizontalScrollBar().value()
+        v0 = view.verticalScrollBar().value()
+        QTest.keyPress(view, Qt.Key_Space)
+        assert view._space_pan
+        QTest.mousePress(view.viewport(), Qt.LeftButton, pos=QPoint(300, 300))
+        assert view._pan_start is not None
+        QTest.mouseMove(view.viewport(), QPoint(200, 200))
+        QTest.mouseRelease(
+            view.viewport(), Qt.LeftButton, pos=QPoint(200, 200)
+        )
+        QTest.keyRelease(view, Qt.Key_Space)
+        assert not view._space_pan
+        assert view._pan_start is None
+        assert view.horizontalScrollBar().value() == h0 + 100
+        assert view.verticalScrollBar().value() == v0 + 100
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_undo_redo_buttons_colored_only_when_available(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        assert not dialog.undo_btn.isEnabled()
+        assert dialog.undo_btn.styleSheet() == ""
+        assert not dialog.redo_btn.isEnabled()
+        assert dialog.redo_btn.styleSheet() == ""
+        dialog.items[0].setSelected(True)
+        dialog._nudge(2, 0)
+        assert dialog.undo_btn.isEnabled()
+        assert "color:" in dialog.undo_btn.styleSheet()
+        assert dialog.redo_btn.styleSheet() == ""
+        dialog._undo()
+        assert not dialog.undo_btn.isEnabled()
+        assert dialog.undo_btn.styleSheet() == ""
+        assert "color:" in dialog.redo_btn.styleSheet()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_checker_brush_is_cached_and_scene_anchored(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        brush = dialog.scene._checker_brush(2.0)
+        assert brush is dialog.scene._checker_brush(2.0)
+        assert dialog.scene._checker_brush(4.0) is not brush
+    finally:
+        dialog._dirty = False
+        dialog.close()

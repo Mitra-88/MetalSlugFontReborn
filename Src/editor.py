@@ -2,20 +2,23 @@ import os
 import queue
 import threading
 from enum import IntEnum
-from math import atan2, ceil, degrees, floor
+from math import atan2, degrees
 from pathlib import Path
 from time import time
 
 from PIL import Image, ImageQt
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QIcon,
     QKeySequence,
+    QPainter,
     QPalette,
     QPen,
     QPixmap,
     QShortcut,
+    QTransform,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -68,7 +71,7 @@ EDITOR_DEFAULT_HEIGHT = 700
 CANVAS_SPLIT_PERCENT = 70
 PANEL_WIDTH = 330
 CANVAS_MIN_WIDTH = 200
-SCENE_PADDING = 60
+SCENE_PADDING = 150
 
 ZOOM_SCALES = (
     1 / 64, 1 / 48, 1 / 32, 1 / 24, 1 / 16, 1 / 12, 1 / 8, 1 / 6, 1 / 5,
@@ -975,6 +978,8 @@ class EditorScene(QGraphicsScene):
         self._guide_pool = []
         self._guide_pens = None
         self._selection_order = []
+        self._checker_key = None
+        self._checker_cache = None
         self.transform_box = TransformBox(self)
 
     def note_selection_change(self, item, selected):
@@ -1162,6 +1167,26 @@ class EditorScene(QGraphicsScene):
                 bounds = bounds.united(self._item_scene_rect(item))
         return bounds
 
+    def _checker_brush(self, zoom):
+        palette = QApplication.palette()
+        base = palette.color(QPalette.ColorRole.Base)
+        text = palette.color(QPalette.ColorRole.Text)
+        alt = _blend(base, text, CHECKER_TINT)
+        px = max(1, round(CHECKER_PX * zoom))
+        key = (px, base.rgba(), alt.rgba())
+        if self._checker_key != key:
+            tile = QPixmap(px * 2, px * 2)
+            tile.fill(alt)
+            tile_painter = QPainter(tile)
+            tile_painter.fillRect(0, 0, px, px, base)
+            tile_painter.fillRect(px, px, px, px, base)
+            tile_painter.end()
+            brush = QBrush(tile)
+            brush.setTransform(QTransform.fromScale(1.0 / zoom, 1.0 / zoom))
+            self._checker_key = key
+            self._checker_cache = brush
+        return self._checker_cache
+
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
         palette = QApplication.palette()
@@ -1178,22 +1203,7 @@ class EditorScene(QGraphicsScene):
         views = self.views()
         zoom = abs(views[0].transform().m11()) if views else 1.0
         if CHECKER_PX * zoom >= CHECKER_MIN_SCREEN_PX:
-            s = CHECKER_PX
-            i0 = ceil(exposed.left() / s)
-            j0 = ceil(exposed.top() / s)
-            i1 = floor(exposed.right() / s)
-            j1 = floor(exposed.bottom() / s)
-            for j in range(int(j0), int(j1) + 1):
-                for i in range(int(i0), int(i1) + 1):
-                    if (i + j) % 2 == 0:
-                        continue
-                    x0 = max(i * s, exposed.left())
-                    y0 = max(j * s, exposed.top())
-                    x1 = min((i + 1) * s, exposed.right())
-                    y1 = min((j + 1) * s, exposed.bottom())
-                    painter.fillRect(
-                        QRectF(x0, y0, x1 - x0, y1 - y0), alt
-                    )
+            painter.fillRect(exposed, self._checker_brush(zoom))
         else:
             painter.fillRect(exposed, alt)
         painter.setPen(QPen(_blend(base, text, BORDER_TINT), 0))
@@ -1750,8 +1760,22 @@ Panels
         )
         self.zoom_entry.set_zoom(self.view.transform().m11())
         self.status_dirty_label.setText("Unsaved edits" if self._dirty else "")
-        self.undo_btn.setEnabled(self.undo_stack.can_undo())
-        self.redo_btn.setEnabled(self.undo_stack.can_redo())
+        self._sync_state_button(
+            self.undo_btn, self.undo_stack.can_undo(), QPalette.ColorRole.Link
+        )
+        self._sync_state_button(
+            self.redo_btn, self.undo_stack.can_redo(), QPalette.ColorRole.LinkVisited
+        )
+
+    def _sync_state_button(self, button, enabled, role):
+        button.setEnabled(enabled)
+        if not enabled:
+            button.setStyleSheet("")
+            return
+        color = QApplication.palette().color(QPalette.ColorGroup.Active, role)
+        button.setStyleSheet(
+            f"QToolButton {{ color: {color.name()}; font-weight: bold; }}"
+        )
 
     def _make_collapsible(self, group, expanded=True):
         group.setCheckable(True)
