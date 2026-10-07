@@ -5,7 +5,7 @@ from pathlib import Path
 from time import time
 
 from PIL import Image, ImageQt
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -365,6 +365,7 @@ def render_character(
     stretch_y=CHAR_SCALE_DEFAULT,
     flip_h=False,
     flip_v=False,
+    fast_rotate=False,
 ):
     img = sprite
     factor_x = scale_pct * stretch_x / 10000.0
@@ -377,19 +378,69 @@ def render_character(
     if flip_v:
         img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
     if rotation:
-        if rotation % 90 == 0:
+        if rotation % 90 == 0 or fast_rotate:
             img = img.rotate(-rotation, expand=True)
         else:
             img = rotsprite_rotate(img, rotation, quality)
     return img
 
 
+class RenderWorker(QObject):
+    rendered = Signal(object, object, object, object)
+
+    def render(self, item, sprite, key, quality):
+        rendered = render_character(
+            sprite, key[0], key[1], quality, key[2], key[3], key[4], key[5]
+        )
+        self.rendered.emit(item, sprite, key, rendered)
+
+
+class RenderDispatcher(QObject):
+    dispatch = Signal(object, object, object, object)
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.thread = QThread()
+        self.worker = RenderWorker()
+        self.worker.moveToThread(self.thread)
+        self.dispatch.connect(self.worker.render)
+        self.worker.rendered.connect(self._on_rendered)
+        self.pending = {}
+        self.busy = False
+        self.thread.start(QThread.Priority.LowPriority)
+
+    def request(self, item, key):
+        self.pending[id(item)] = (item, item.sprite, key, item.rotation_quality)
+        if not self.busy:
+            self._submit()
+
+    def _submit(self):
+        entry = self.pending.popitem()
+        self.busy = True
+        self.dispatch.emit(*entry[1])
+
+    def _on_rendered(self, item, sprite, key, rendered):
+        self.busy = False
+        try:
+            item.apply_rendered(sprite, key, rendered)
+        except RuntimeError:
+            pass
+        if self.pending:
+            self._submit()
+
+    def shutdown(self):
+        self.pending.clear()
+        self.thread.quit()
+        self.thread.wait(3000)
+
+
 class CharItem(QGraphicsPixmapItem):
-    def __init__(self, char, sprite, base_x, base_y, sprite_provider):
+    def __init__(self, char, sprite, base_x, base_y, sprite_provider, dispatcher=None):
         super().__init__()
         self.char = char
         self.sprite = sprite.convert("RGBA")
         self._sprite_provider = sprite_provider
+        self._dispatcher = dispatcher
         self.layout_anchored = True
         self.base_x = base_x
         self.base_y = base_y
@@ -470,6 +521,27 @@ class CharItem(QGraphicsPixmapItem):
         key = self._cache_key()
         rendered = self._pix_cache.get(key)
         if rendered is None:
+            if self._dispatcher is not None and self.rotation % 90:
+                self.setPixmap(
+                    QPixmap.fromImage(
+                        ImageQt.ImageQt(
+                            render_character(
+                                self.sprite,
+                                key[0],
+                                key[1],
+                                self.rotation_quality,
+                                key[2],
+                                key[3],
+                                key[4],
+                                key[5],
+                                fast_rotate=True,
+                            )
+                        )
+                    )
+                )
+                self._after_pixmap_change()
+                self._dispatcher.request(self, key)
+                return
             rendered = render_character(
                 self.sprite,
                 self.scale_pct,
@@ -485,6 +557,20 @@ class CharItem(QGraphicsPixmapItem):
             self._pix_cache[key] = rendered
         qimage = ImageQt.ImageQt(rendered)
         self.setPixmap(QPixmap.fromImage(qimage))
+        self._after_pixmap_change()
+
+    def apply_rendered(self, sprite, key, rendered):
+        if sprite is not self.sprite:
+            return
+        if len(self._pix_cache) >= PIX_CACHE_MAX_ENTRIES:
+            self._pix_cache.clear()
+        self._pix_cache[key] = rendered
+        if key != self._cache_key():
+            return
+        self.setPixmap(QPixmap.fromImage(ImageQt.ImageQt(rendered)))
+        self._after_pixmap_change()
+
+    def _after_pixmap_change(self):
         self._place()
         scene = self.scene()
         if scene is not None and scene.parent_dialog is not None:
@@ -1236,6 +1322,7 @@ class AdvancedEditorDialog(QDialog):
         self._exported_signature = None
         self._fitted = False
         self._sprite_provider = self._sprite_for
+        self._render_dispatcher = RenderDispatcher(self)
         self._build_scene()
         self._build_ui()
         self._connect_selection()
@@ -1276,7 +1363,9 @@ class AdvancedEditorDialog(QDialog):
 
         self.items = []
         for char, sprite, x, y in placements:
-            item = CharItem(char, sprite, x, y, self._sprite_provider)
+            item = CharItem(
+                char, sprite, x, y, self._sprite_provider, self._render_dispatcher
+            )
             item.update_pixmap()
             self.scene.addItem(item)
             self.items.append(item)
@@ -2343,7 +2432,8 @@ Panels
                 x += rendered.width + self.letter_spacing
                 continue
             ni = CharItem(
-                ch, sprite, x, bottom - rendered.height, self._sprite_provider
+                ch, sprite, x, bottom - rendered.height, self._sprite_provider,
+                self._render_dispatcher,
             )
             ni.layout_anchored = False
             ni.scale_pct = item.scale_pct
@@ -2485,10 +2575,12 @@ Panels
 
     def reject(self):
         if self._confirm_discard():
+            self._render_dispatcher.shutdown()
             super().reject()
 
     def closeEvent(self, event):
         if self._confirm_discard():
+            self._render_dispatcher.shutdown()
             super().closeEvent(event)
         else:
             event.ignore()

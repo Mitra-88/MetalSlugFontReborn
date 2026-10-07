@@ -839,3 +839,34 @@ def test_icon_only_buttons_have_accessible_names(qapp, tmp_path):
     finally:
         dialog._dirty = False
         dialog.close()
+
+
+def test_rotated_render_runs_on_worker_thread(qapp, tmp_path, monkeypatch):
+    import threading
+
+    import editor as editor_module
+
+    dialog = make_dialog(tmp_path)
+    try:
+        threads = []
+        original = editor_module.render_character
+
+        def spy(*args, **kwargs):
+            threads.append(threading.get_ident())
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(editor_module, "render_character", spy)
+        item = dialog.items[0]
+        item.rotation = 45
+        item.update_pixmap()
+        assert item._pix_cache.get(item._cache_key()) is None
+        assert not item.pixmap().isNull()
+        for _ in range(500):
+            if item._pix_cache.get(item._cache_key()) is not None:
+                break
+            qapp.processEvents()
+        assert item._pix_cache.get(item._cache_key()) is not None
+        assert any(t != threading.get_ident() for t in threads)
+    finally:
+        dialog._dirty = False
+        dialog.close()
