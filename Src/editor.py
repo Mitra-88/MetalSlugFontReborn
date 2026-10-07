@@ -1,3 +1,4 @@
+import colorsys
 import os
 import queue
 import threading
@@ -6,7 +7,7 @@ from math import atan2, degrees
 from pathlib import Path
 from time import time
 
-from PIL import Image, ImageQt
+from PIL import Image, ImageChops, ImageQt
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
@@ -82,6 +83,14 @@ ZOOM_SCALES = (
 CHAR_SCALE_MIN = 10
 CHAR_SCALE_MAX = 400
 CHAR_SCALE_DEFAULT = 100
+
+HUE_NEUTRAL_SATURATION = 0.08
+HUE_MIN = -180
+HUE_MAX = 180
+OPACITY_MIN = 0
+OPACITY_MAX = 100
+OPACITY_DEFAULT = 100
+DUPLICATE_OFFSET = 10
 
 ROTATION_MIN = -180
 ROTATION_MAX = 180
@@ -365,6 +374,39 @@ ALIGNMENTS = ["Left", "Center", "Right"]
 UNDO_MAX_STEPS = 30
 
 
+def shift_sprite_hue(sprite, degrees):
+    if not degrees % 360:
+        return sprite
+    mapping = {}
+    for _count, color in sprite.getcolors(1 << 20) or []:
+        rgb = color[:3]
+        hue, sat, val = colorsys.rgb_to_hsv(
+            rgb[0] / 255, rgb[1] / 255, rgb[2] / 255
+        )
+        if sat < HUE_NEUTRAL_SATURATION:
+            continue
+        r, g, b = colorsys.hsv_to_rgb((hue + degrees / 360.0) % 1.0, sat, val)
+        mapping[rgb] = (round(r * 255), round(g * 255), round(b * 255))
+    if not mapping:
+        return sprite
+    channels = list(sprite.split())
+    jobs = []
+    for old_rgb, new_rgb in mapping.items():
+        masks = []
+        for band, component in zip(channels[:3], old_rgb):
+            lut = [0] * 256
+            lut[component] = 255
+            masks.append(band.point(lut))
+        mask = masks[0]
+        for extra in masks[1:]:
+            mask = ImageChops.multiply(mask, extra)
+        jobs.append((mask, new_rgb))
+    for mask, new_rgb in jobs:
+        for band, component in zip(channels[:3], new_rgb):
+            band.paste(Image.new("L", sprite.size, component), mask=mask)
+    return Image.merge("RGBA", channels)
+
+
 def render_character(
     sprite,
     scale_pct=CHAR_SCALE_DEFAULT,
@@ -374,6 +416,7 @@ def render_character(
     stretch_y=CHAR_SCALE_DEFAULT,
     flip_h=False,
     flip_v=False,
+    opacity=OPACITY_DEFAULT,
     fast_rotate=False,
 ):
     img = sprite
@@ -386,6 +429,9 @@ def render_character(
         img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     if flip_v:
         img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+    if opacity != OPACITY_DEFAULT:
+        alpha = img.getchannel("A").point(lambda value: value * opacity // 100)
+        img = Image.merge("RGBA", (*img.split()[:3], alpha))
     if rotation:
         if rotation % 90 == 0 or fast_rotate:
             img = img.rotate(-rotation, expand=True)
@@ -397,7 +443,15 @@ def render_character(
 def render_job(sprite, key, quality):
     try:
         return render_character(
-            sprite, key[0], key[1], quality, key[2], key[3], key[4], key[5]
+            sprite,
+            key[0],
+            key[1],
+            quality,
+            key[2],
+            key[3],
+            key[4],
+            key[5],
+            opacity=key[6],
         )
     except Exception:  # noqa: BLE001
         return None
@@ -414,7 +468,7 @@ class RenderDispatcher(QObject):
         self._thread.start()
 
     def request(self, item, key):
-        self._jobs.put((item, item.sprite, key, item.rotation_quality))
+        self._jobs.put((item, item.tinted_sprite(), key, item.rotation_quality))
 
     def _work(self):
         while True:
@@ -468,7 +522,10 @@ class CharItem(QGraphicsPixmapItem):
         self.stretch_y = CHAR_SCALE_DEFAULT
         self.flip_h = False
         self.flip_v = False
+        self.opacity = OPACITY_DEFAULT
+        self.hue_shift = 0
         self._pix_cache = {}
+        self._hue_cache = {}
         self.rotation_quality = QUALITY_FAST_ROTSPRITE
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
@@ -489,6 +546,9 @@ class CharItem(QGraphicsPixmapItem):
             self.stretch_y,
             self.flip_h,
             self.flip_v,
+            self.opacity,
+            self.hue_shift,
+            self.zValue(),
         )
 
     def apply_state(self, state):
@@ -505,9 +565,13 @@ class CharItem(QGraphicsPixmapItem):
             self.stretch_y,
             self.flip_h,
             self.flip_v,
+            self.opacity,
+            self.hue_shift,
+            z_value,
         ) = state
         if char != self.char:
             self.set_character(char)
+        self.setZValue(z_value)
         self.setVisible(visible)
         self.update_pixmap()
 
@@ -515,6 +579,18 @@ class CharItem(QGraphicsPixmapItem):
         self.char = char
         self.sprite = self._sprite_provider(char).convert("RGBA")
         self._pix_cache.clear()
+        self._hue_cache.clear()
+
+    def tinted_sprite(self):
+        if not self.hue_shift % 360:
+            return self.sprite
+        cached = self._hue_cache.get(self.hue_shift)
+        if cached is None:
+            cached = shift_sprite_hue(self.sprite, self.hue_shift)
+            if len(self._hue_cache) >= 8:
+                self._hue_cache.clear()
+            self._hue_cache[self.hue_shift] = cached
+        return cached
 
     def _cache_key(self):
         return (
@@ -524,6 +600,8 @@ class CharItem(QGraphicsPixmapItem):
             self.stretch_y,
             self.flip_h,
             self.flip_v,
+            self.opacity,
+            self.hue_shift,
         )
 
     def prune_cache(self):
@@ -542,7 +620,7 @@ class CharItem(QGraphicsPixmapItem):
                     QPixmap.fromImage(
                         ImageQt.ImageQt(
                             render_character(
-                                self.sprite,
+                                self.tinted_sprite(),
                                 key[0],
                                 key[1],
                                 self.rotation_quality,
@@ -550,6 +628,7 @@ class CharItem(QGraphicsPixmapItem):
                                 key[3],
                                 key[4],
                                 key[5],
+                                opacity=key[6],
                                 fast_rotate=True,
                             )
                         )
@@ -559,7 +638,7 @@ class CharItem(QGraphicsPixmapItem):
                 self._dispatcher.request(self, key)
                 return
             rendered = render_character(
-                self.sprite,
+                self.tinted_sprite(),
                 self.scale_pct,
                 self.rotation,
                 self.rotation_quality,
@@ -567,6 +646,7 @@ class CharItem(QGraphicsPixmapItem):
                 self.stretch_y,
                 self.flip_h,
                 self.flip_v,
+                self.opacity,
             )
             if len(self._pix_cache) >= PIX_CACHE_MAX_ENTRIES:
                 self._pix_cache.clear()
@@ -576,7 +656,7 @@ class CharItem(QGraphicsPixmapItem):
         self._after_pixmap_change()
 
     def apply_rendered(self, sprite, key, rendered):
-        if sprite is not self.sprite:
+        if sprite is not self.tinted_sprite():
             return
         if len(self._pix_cache) >= PIX_CACHE_MAX_ENTRIES:
             self._pix_cache.clear()
@@ -1224,8 +1304,11 @@ class EditorScene(QGraphicsScene):
         item.setSelected(True)
         dialog = self.parent_dialog
         menu = QMenu()
+        menu.addAction("Duplicate", lambda: dialog._duplicate_selection())
         menu.addAction("Reset Scale", lambda: dialog._reset_item(item, "scale_pct"))
         menu.addAction("Reset Rotation", lambda: dialog._reset_item(item, "rotation"))
+        menu.addAction("Bring to Front", lambda: dialog._reorder_selection(True))
+        menu.addAction("Send to Back", lambda: dialog._reorder_selection(False))
         menu.addAction("Delete Character", lambda: dialog._delete_items([item]))
         menu.exec(event.screenPos())
 
@@ -1532,7 +1615,12 @@ class AdvancedEditorDialog(QDialog):
             (self.stretch_x_spin, self.stretch_y_spin),
             (self.stretch_y_spin, self.rotation_slider),
             (self.rotation_slider, self.rotation_spin),
-            (self.rotation_spin, self.letter_spacing_spin),
+            (self.rotation_spin, self.rotation_quality),
+            (self.rotation_quality, self.opacity_slider),
+            (self.opacity_slider, self.opacity_spin),
+            (self.opacity_spin, self.hue_slider),
+            (self.hue_slider, self.hue_spin),
+            (self.hue_spin, self.letter_spacing_spin),
             (self.letter_spacing_spin, self.line_spacing_spin),
             (self.line_spacing_spin, self.baseline_combo),
             (self.baseline_combo, self.align_combo),
@@ -1720,7 +1808,7 @@ Keys
 - Arrow keys nudge the selection, Shift + Arrow nudges by 10.
 - Ctrl+A selects every visible character, Escape clears the
   selection (or closes the editor when nothing is selected),
-  Delete removes the selected ones.
+  Delete removes the selected ones, Ctrl+D duplicates them.
 - Ctrl+Z / Ctrl+Y undo and redo, Ctrl+S saves the image.
 - Ctrl+= / Ctrl+- zoom in and out through the preset steps,
   Ctrl+0 fits the view, Ctrl+1 resets to 100%.
@@ -1731,8 +1819,12 @@ Panels
 
 - Character Controls edits the current selection. The controls
   stay disabled while nothing is selected. The quick buttons
-  flip the selection, rotate it by exact 90 degrees, or reset
-  scale, stretch, rotation and flips.
+  flip the selection, rotate it by exact 90 degrees, duplicate
+  it, raise or lower its draw order, or reset scale, stretch,
+  rotation, flips, opacity and hue.
+- Opacity blends the selected characters over what is behind
+  them; Hue shift rotates their colors around the wheel while
+  keeping white and black shades readable.
 - Spacing & Alignment re-lays out every visible character from
   the original text (spacing, vertical align, line align).
 """
@@ -1914,6 +2006,50 @@ Panels
         )
         form.addRow("Rotation quality:", self.rotation_quality)
 
+        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setRange(OPACITY_MIN, OPACITY_MAX)
+        self.opacity_slider.setValue(OPACITY_DEFAULT)
+        self.opacity_slider.setToolTip(
+            "Opacity of the selected character(s): 100% is fully solid, "
+            "lower values blend the character over what is behind it."
+        )
+        self.opacity_spin = QSpinBox()
+        self.opacity_spin.setRange(OPACITY_MIN, OPACITY_MAX)
+        self.opacity_spin.setValue(OPACITY_DEFAULT)
+        self.opacity_spin.setSuffix("%")
+        self.opacity_spin.setToolTip("Type an exact opacity percentage.")
+        self.opacity_slider.valueChanged.connect(self._on_opacity_slider_changed)
+        self.opacity_spin.valueChanged.connect(self._on_opacity_spin_changed)
+        self.opacity_slider.sliderPressed.connect(self._begin_slider_undo)
+        self.opacity_slider.sliderReleased.connect(self._end_slider_undo)
+        opacity_row = QHBoxLayout()
+        opacity_row.addWidget(self.opacity_slider, 1)
+        opacity_row.addWidget(self.opacity_spin)
+        form.addRow("Opacity:", opacity_row)
+
+        self.hue_slider = QSlider(Qt.Horizontal)
+        self.hue_slider.setRange(HUE_MIN, HUE_MAX)
+        self.hue_slider.setValue(0)
+        self.hue_slider.setTickPosition(QSlider.TicksBelow)
+        self.hue_slider.setTickInterval(45)
+        self.hue_slider.setToolTip(
+            "Rotate the colors of the selected character(s) around the "
+            "color wheel. White and black pixels keep their shade; only "
+            "colored pixels change, so the sprite stays readable."
+        )
+        self.hue_spin = QSpinBox()
+        self.hue_spin.setRange(HUE_MIN, HUE_MAX)
+        self.hue_spin.setSuffix("°")
+        self.hue_spin.setToolTip("Type an exact hue rotation in degrees.")
+        self.hue_slider.valueChanged.connect(self._on_hue_slider_changed)
+        self.hue_spin.valueChanged.connect(self._on_hue_spin_changed)
+        self.hue_slider.sliderPressed.connect(self._begin_slider_undo)
+        self.hue_slider.sliderReleased.connect(self._end_slider_undo)
+        hue_row = QHBoxLayout()
+        hue_row.addWidget(self.hue_slider, 1)
+        hue_row.addWidget(self.hue_spin)
+        form.addRow("Hue shift:", hue_row)
+
         form.addRow(self._build_selection_actions_row())
 
         return group
@@ -1974,7 +2110,8 @@ Panels
             (
                 (
                     "Reset",
-                    "Reset scale, stretch, rotation and flips; position is kept.",
+                    ("Reset scale, stretch, rotation, flips, opacity and "
+                     "hue; position is kept."),
                     self._reset_transform_selection,
                 ),
             )
@@ -2013,6 +2150,32 @@ Panels
             btn.setToolTip(tip)
             btn.clicked.connect(handler)
             grid.addWidget(btn, 4, column)
+            self._transform_buttons.append(btn)
+
+        for column, (text, tip, handler) in enumerate(
+            (
+                (
+                    "Duplicate",
+                    ("Copy the selected characters next to the originals "
+                     "(Ctrl+D)."),
+                    self._duplicate_selection,
+                ),
+                (
+                    "To Front",
+                    "Draw the selected characters above everything else.",
+                    lambda: self._reorder_selection(True),
+                ),
+                (
+                    "To Back",
+                    "Draw the selected characters below everything else.",
+                    lambda: self._reorder_selection(False),
+                ),
+            )
+        ):
+            btn = QPushButton(text)
+            btn.setToolTip(tip)
+            btn.clicked.connect(handler)
+            grid.addWidget(btn, 5, column)
             self._transform_buttons.append(btn)
 
         return widget
@@ -2105,6 +2268,8 @@ Panels
 
         select_all_sc = QShortcut(QKeySequence.StandardKey.SelectAll, self)
         select_all_sc.activated.connect(self._select_all)
+        duplicate_sc = QShortcut(QKeySequence("Ctrl+D"), self)
+        duplicate_sc.activated.connect(self._duplicate_selection)
 
         for key, (ddx, ddy) in (
             ("Left", (-NUDGE_STEP, 0)),
@@ -2187,8 +2352,69 @@ Panels
             item.rotation = 0
             item.flip_h = False
             item.flip_v = False
+            item.opacity = OPACITY_DEFAULT
+            item.hue_shift = 0
             item.prune_cache()
             item.update_pixmap()
+        self._push(before)
+        self._sync_panel()
+
+    def _duplicate_selection(self):
+        if self._in_canvas_gesture():
+            return
+        selected = [item for item in self._selected() if item.isVisible()]
+        if not selected:
+            return
+        before = self._capture_all()
+        for item in selected:
+            ni = CharItem(
+                item.char,
+                item.sprite,
+                item.base_x + DUPLICATE_OFFSET,
+                item.base_y + DUPLICATE_OFFSET,
+                self._sprite_provider,
+                self._render_dispatcher,
+            )
+            ni.layout_anchored = False
+            ni.dx = item.dx
+            ni.dy = item.dy
+            ni.scale_pct = item.scale_pct
+            ni.rotation = item.rotation
+            ni.rotation_quality = item.rotation_quality
+            ni.stretch_x = item.stretch_x
+            ni.stretch_y = item.stretch_y
+            ni.flip_h = item.flip_h
+            ni.flip_v = item.flip_v
+            ni.opacity = item.opacity
+            ni.hue_shift = item.hue_shift
+            ni.setZValue(item.zValue())
+            self.scene.addItem(ni)
+            self.items.append(ni)
+            ni.update_pixmap()
+            ni.setVisible(False)
+            before[ni] = ni.capture_state()
+            ni.setVisible(True)
+            item.setSelected(False)
+            ni.setSelected(True)
+        self._push(before)
+        self._sync_panel()
+
+    def _reorder_selection(self, to_front):
+        selected = [item for item in self._selected() if item.isVisible()]
+        if not selected:
+            return
+        before = self._snapshot_selected()
+        zs = [item.zValue() for item in self.items]
+        if to_front:
+            target = max(zs) if zs else 0
+            for item in selected:
+                target += 1
+                item.setZValue(target)
+        else:
+            target = min(zs) if zs else 0
+            for item in selected:
+                target -= 1
+                item.setZValue(target)
         self._push(before)
         self._sync_panel()
 
@@ -2316,6 +2542,10 @@ Panels
             self.rotation_spin,
             self.stretch_x_spin,
             self.stretch_y_spin,
+            self.opacity_slider,
+            self.opacity_spin,
+            self.hue_slider,
+            self.hue_spin,
         ):
             widget.blockSignals(True)
         try:
@@ -2329,6 +2559,10 @@ Panels
                 self.rotation_spin.setValue(first.rotation)
                 self.stretch_x_spin.setValue(first.stretch_x)
                 self.stretch_y_spin.setValue(first.stretch_y)
+                self.opacity_slider.setValue(first.opacity)
+                self.opacity_spin.setValue(first.opacity)
+                self.hue_slider.setValue(first.hue_shift)
+                self.hue_spin.setValue(first.hue_shift)
         finally:
             for widget in (
                 self.offset_x_spin,
@@ -2339,6 +2573,10 @@ Panels
                 self.rotation_spin,
                 self.stretch_x_spin,
                 self.stretch_y_spin,
+                self.opacity_slider,
+                self.opacity_spin,
+                self.hue_slider,
+                self.hue_spin,
             ):
                 widget.blockSignals(False)
 
@@ -2352,6 +2590,10 @@ Panels
             self.rotation_spin,
             self.stretch_x_spin,
             self.stretch_y_spin,
+            self.opacity_slider,
+            self.opacity_spin,
+            self.hue_slider,
+            self.hue_spin,
             self.rotation_quality,
         ):
             widget.setEnabled(has_selection)
@@ -2394,7 +2636,7 @@ Panels
             new_cy = cy + (rect.center().y() - cy) * factor
             item.scale_pct = value
             rendered = render_character(
-                item.sprite,
+                item.tinted_sprite(),
                 value,
                 item.rotation,
                 item.rotation_quality,
@@ -2402,6 +2644,7 @@ Panels
                 item.stretch_y,
                 item.flip_h,
                 item.flip_v,
+                item.opacity,
             )
             item._pix_cache[item._cache_key()] = rendered
             w, h = rendered.size
@@ -2440,6 +2683,36 @@ Panels
         self.rotation_slider.setValue(value)
         self.rotation_slider.blockSignals(False)
         self._apply_char_property("rotation", value)
+
+    def _on_opacity_slider_changed(self, value):
+        for widget in (self.opacity_slider, self.opacity_spin):
+            widget.blockSignals(True)
+            widget.setValue(value)
+            widget.blockSignals(False)
+        self._apply_char_property(
+            "opacity", value, push=not self._in_slider_gesture()
+        )
+
+    def _on_opacity_spin_changed(self, value):
+        self.opacity_slider.blockSignals(True)
+        self.opacity_slider.setValue(value)
+        self.opacity_slider.blockSignals(False)
+        self._apply_char_property("opacity", value)
+
+    def _on_hue_slider_changed(self, value):
+        for widget in (self.hue_slider, self.hue_spin):
+            widget.blockSignals(True)
+            widget.setValue(value)
+            widget.blockSignals(False)
+        self._apply_char_property(
+            "hue_shift", value, push=not self._in_slider_gesture()
+        )
+
+    def _on_hue_spin_changed(self, value):
+        self.hue_slider.blockSignals(True)
+        self.hue_slider.setValue(value)
+        self.hue_slider.blockSignals(False)
+        self._apply_char_property("hue_shift", value)
 
     def _in_slider_gesture(self):
         return getattr(self, "_slider_undo_before", None) is not None
@@ -2656,6 +2929,8 @@ Panels
             ni.stretch_y = item.stretch_y
             ni.flip_h = item.flip_h
             ni.flip_v = item.flip_v
+            ni.opacity = item.opacity
+            ni.hue_shift = item.hue_shift
             self.scene.addItem(ni)
             self.items.append(ni)
             ni.setVisible(False)
@@ -2895,14 +3170,14 @@ Panels
         placed = []
         min_x = min_y = None
         max_x = max_y = None
-        for item in self.items:
+        for item in sorted(self.items, key=lambda entry: entry.zValue()):
             if not item.isVisible():
                 continue
             key = item._cache_key()
             rendered = item._pix_cache.get(key)
             if rendered is None:
                 rendered = render_character(
-                    item.sprite,
+                    item.tinted_sprite(),
                     item.scale_pct,
                     item.rotation,
                     item.rotation_quality,
@@ -2910,6 +3185,7 @@ Panels
                     item.stretch_y,
                     item.flip_h,
                     item.flip_v,
+                    item.opacity,
                 )
                 item._pix_cache[key] = rendered
             x = round(item.base_x + item.dx)

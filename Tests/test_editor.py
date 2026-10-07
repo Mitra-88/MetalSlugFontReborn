@@ -129,7 +129,9 @@ def test_slider_release_prunes_item_cache(qapp, tmp_path):
         dialog.scale_slider.setValue(250)
         assert item.scale_pct == 250
         dialog._end_slider_undo()
-        assert list(item._pix_cache.keys()) == [(250, 0, 100, 100, False, False)]
+        assert list(item._pix_cache.keys()) == [
+            (250, 0, 100, 100, False, False, 100, 0)
+        ]
     finally:
         dialog._dirty = False
         dialog.close()
@@ -174,7 +176,9 @@ def test_scale_slider_seeds_pix_cache(qapp, tmp_path):
     dialog.scale_slider.setValue(180)
     dialog._end_slider_undo()
     assert item.scale_pct == 180
-    assert list(item._pix_cache.keys()) == [(180, 0, 100, 100, False, False)]
+    assert list(item._pix_cache.keys()) == [
+        (180, 0, 100, 100, False, False, 100, 0)
+    ]
     dialog._dirty = False
     dialog.close()
 
@@ -980,6 +984,136 @@ def test_checker_brush_is_cached_and_scene_anchored(qapp, tmp_path):
         brush = dialog.scene._checker_brush(2.0)
         assert brush is dialog.scene._checker_brush(2.0)
         assert dialog.scene._checker_brush(4.0) is not brush
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_render_character_opacity_scales_alpha():
+    from PIL import Image
+
+    from editor import render_character
+
+    sprite = Image.new("RGBA", (2, 2), (255, 0, 0, 200))
+    out = render_character(sprite, opacity=50)
+    assert out.getpixel((0, 0)) == (255, 0, 0, 100)
+    assert render_character(sprite).getpixel((0, 0)) == (255, 0, 0, 200)
+    assert sprite.getpixel((0, 0)) == (255, 0, 0, 200)
+
+
+def test_shift_sprite_hue_rotates_colors_and_keeps_neutrals():
+    import colorsys
+
+    from PIL import Image
+
+    from editor import shift_sprite_hue
+
+    sprite = Image.new("RGBA", (3, 1))
+    sprite.putpixel((0, 0), (255, 0, 0, 255))
+    sprite.putpixel((1, 0), (248, 248, 248, 255))
+    sprite.putpixel((2, 0), (0, 0, 0, 255))
+    out = shift_sprite_hue(sprite, 120)
+    assert out.getpixel((1, 0)) == (248, 248, 248, 255)
+    assert out.getpixel((2, 0)) == (0, 0, 0, 255)
+    r, g, b = out.getpixel((0, 0))[:3]
+    hue = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)[0] * 360
+    assert abs(hue - 120) <= 2
+    assert sprite.getpixel((0, 0)) == (255, 0, 0, 255)
+
+
+def test_cache_key_includes_opacity_and_hue(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        key = item._cache_key()
+        assert len(key) == 8
+        assert key[6] == 100 and key[7] == 0
+        item.opacity = 50
+        item.hue_shift = 90
+        assert item._cache_key() != key
+        assert item.tinted_sprite() is not item.sprite
+        item.hue_shift = 0
+        assert item.tinted_sprite() is item.sprite
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_opacity_and_hue_apply_slider_sync_and_undo(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        dialog.opacity_spin.setValue(40)
+        assert item.opacity == 40
+        assert dialog.opacity_slider.value() == 40
+        dialog.hue_spin.setValue(120)
+        assert item.hue_shift == 120
+        assert dialog.hue_slider.value() == 120
+        dialog._undo()
+        assert item.hue_shift == 0 and item.opacity == 40
+        dialog._undo()
+        assert item.opacity == 100
+        dialog.opacity_spin.setValue(30)
+        dialog._reset_transform_selection()
+        assert item.opacity == 100 and item.hue_shift == 0
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_duplicate_selection_copies_transforms_and_undo_hides(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        item.scale_pct = 150
+        item.opacity = 60
+        item.hue_shift = 45
+        item.rotation = 30
+        count = len(dialog.items)
+        dialog._duplicate_selection()
+        assert len(dialog.items) == count + 1
+        ni = dialog.items[-1]
+        assert ni.char == item.char
+        assert ni.scale_pct == 150
+        assert ni.opacity == 60
+        assert ni.hue_shift == 45
+        assert ni.rotation == 30
+        assert ni.isVisible()
+        assert ni.isSelected()
+        dialog._undo()
+        assert not ni.isVisible()
+        dialog._redo()
+        assert ni.isVisible()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_z_order_front_back_with_undo_and_export(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        first, second = dialog.items[0], dialog.items[1]
+        first.setSelected(True)
+        dialog._reorder_selection(True)
+        assert first.zValue() > second.zValue()
+        order = [
+            id(item) for item in sorted(dialog.items, key=lambda e: e.zValue())
+        ]
+        assert order[-1] == id(first)
+        dialog._undo()
+        assert first.zValue() == 0.0 and second.zValue() == 0.0
+        dialog._reorder_selection(False)
+        assert first.zValue() < second.zValue()
+        order = [
+            id(item) for item in sorted(dialog.items, key=lambda e: e.zValue())
+        ]
+        assert order[0] == id(first)
+        dialog._undo()
+        second.dx = first.dx + 5
+        second.dy = first.dy + 5
+        assert dialog.export_image() is True
     finally:
         dialog._dirty = False
         dialog.close()
