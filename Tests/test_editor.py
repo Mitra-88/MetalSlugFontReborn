@@ -1,4 +1,4 @@
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 
 from editor import AdvancedEditorDialog
 from image_generation import get_font_charset
@@ -957,7 +957,7 @@ def test_dialog_destroy_under_pending_renders_does_not_abort(qapp, tmp_path):
 
 
 def test_space_drag_pans_the_view(qapp, tmp_path):
-    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
 
     dialog = make_dialog(tmp_path)
@@ -1597,6 +1597,57 @@ def test_per_character_color_variant(qapp, tmp_path):
         duplicate = dialog.items[-1]
         assert duplicate.color_variant == target
         dialog._undo()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_background_bounds_cache_stays_fresh(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        scene = dialog.scene
+        item = dialog.items[-1]
+        initial = scene._background_bounds()
+        assert scene._background_bounds() == initial
+        item.dx += 200
+        item._place()
+        grown = scene._background_bounds()
+        assert grown.right() > initial.right()
+        item.setVisible(False)
+        shrunk = scene._background_bounds()
+        assert shrunk.right() < grown.right()
+        item.setVisible(True)
+        assert scene._background_bounds().right() == grown.right()
+        old_size = (item.scale_pct, item.stretch_x)
+        item.scale_pct = 400
+        item.stretch_x = 400
+        item.update_pixmap()
+        assert scene._background_bounds().right() > grown.right()
+        item.scale_pct, item.stretch_x = old_size
+        item.update_pixmap()
+        dialog._update_scene_rect()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_slider_gesture_commit_keeps_panel_and_scene_consistent(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        dialog._begin_slider_undo()
+        dialog.scale_slider.setValue(180)
+        assert item.scale_pct == 180
+        assert dialog.undo_stack.can_undo() is False
+        dialog._end_slider_undo()
+        assert dialog.undo_stack.can_undo()
+        assert dialog.scale_spin.value() == 180
+        rect_after = dialog.scene._item_scene_rect(item)
+        assert rect_after.width() > item.pixmap().width() - 1
+        dialog._undo()
+        assert item.scale_pct == 100
+        assert dialog.scene._item_scene_rect(item).width() < rect_after.width()
     finally:
         dialog._dirty = False
         dialog.close()

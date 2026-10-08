@@ -570,6 +570,9 @@ class CharItem(QGraphicsPixmapItem):
         )
 
     def apply_state(self, state):
+        scene = self.scene()
+        if scene is not None:
+            scene.invalidate_bounds()
         (
             self.dx,
             self.dy,
@@ -698,6 +701,9 @@ class CharItem(QGraphicsPixmapItem):
             scene.transform_box.refresh()
 
     def _after_pixmap_change(self):
+        scene = self.scene()
+        if scene is not None:
+            scene.invalidate_bounds()
         self._place()
         scene = self.scene()
         if scene is not None and scene.parent_dialog is not None:
@@ -705,11 +711,20 @@ class CharItem(QGraphicsPixmapItem):
 
     def _place(self):
         self.setPos(self.base_x + self.dx, self.base_y + self.dy)
+        scene = self.scene()
+        if scene is not None:
+            scene.invalidate_bounds()
 
     def set_base(self, x, y):
         self.base_x = x
         self.base_y = y
         self._place()
+
+    def setVisible(self, visible):
+        super().setVisible(visible)
+        scene = self.scene()
+        if scene is not None:
+            scene.invalidate_bounds()
 
     def hoverEnterEvent(self, event):
         self.setCursor(Qt.PointingHandCursor)
@@ -1174,6 +1189,7 @@ class EditorScene(QGraphicsScene):
         self._selection_order = []
         self._checker_key = None
         self._checker_cache = None
+        self._bounds_cache = None
         self._band_start = None
         self._ant_offset = 0.0
         self._preview_pool = []
@@ -1369,8 +1385,9 @@ class EditorScene(QGraphicsScene):
             return
         super().mouseMoveEvent(event)
         if not (event.buttons() & Qt.LeftButton):
-            self._hide_guides()
-            self.transform_box.refresh()
+            if any(guide.isVisible() for guide in self._guide_pool):
+                self._hide_guides()
+                self.transform_box.refresh()
             return
         raw_translation = event.scenePos() - event.buttonDownScenePos(Qt.LeftButton)
         self._apply_object_snap(event.modifiers(), raw_translation)
@@ -1508,7 +1525,12 @@ class EditorScene(QGraphicsScene):
         for line_item in self._guide_pool:
             line_item.hide()
 
+    def invalidate_bounds(self):
+        self._bounds_cache = None
+
     def _background_bounds(self):
+        if self._bounds_cache is not None:
+            return QRectF(self._bounds_cache)
         dialog = self.parent_dialog
         if dialog is None:
             return QRectF()
@@ -1516,6 +1538,7 @@ class EditorScene(QGraphicsScene):
         for item in dialog.items:
             if item.isVisible():
                 bounds = bounds.united(self._item_scene_rect(item))
+        self._bounds_cache = QRectF(bounds)
         return bounds
 
     def _checker_brush(self, zoom):
@@ -2870,7 +2893,12 @@ Panels
                 item.update_pixmap()
         if push:
             self._push(before)
-        self._sync_panel()
+        if self._in_slider_gesture():
+            self._update_scene_rect()
+            self._update_status_counts()
+            self.scene.transform_box.refresh()
+        else:
+            self._sync_panel()
 
     def _scale_selection(self, items, value):
         rects = {item: self.scene._item_scene_rect(item) for item in items}
