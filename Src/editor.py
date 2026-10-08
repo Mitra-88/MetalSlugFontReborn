@@ -447,6 +447,8 @@ def render_character(
 
 def render_job(sprite, key, quality):
     try:
+        if key[7] % 360:
+            sprite = shift_sprite_hue(sprite, key[7])
         return render_character(
             sprite,
             key[0],
@@ -473,7 +475,7 @@ class RenderDispatcher(QObject):
         self._thread.start()
 
     def request(self, item, key):
-        self._jobs.put((item, item.tinted_sprite(), key, item.rotation_quality))
+        self._jobs.put((item, item.sprite, key, item.rotation_quality))
 
     def _work(self):
         while True:
@@ -510,9 +512,19 @@ class RenderDispatcher(QObject):
 
 
 class CharItem(QGraphicsPixmapItem):
-    def __init__(self, char, sprite, base_x, base_y, sprite_provider, dispatcher=None):
+    def __init__(
+        self,
+        char,
+        sprite,
+        base_x,
+        base_y,
+        sprite_provider,
+        dispatcher=None,
+        color_variant=None,
+    ):
         super().__init__()
         self.char = char
+        self.color_variant = color_variant
         self.sprite = sprite.convert("RGBA")
         self._sprite_provider = sprite_provider
         self._dispatcher = dispatcher
@@ -554,6 +566,7 @@ class CharItem(QGraphicsPixmapItem):
             self.opacity,
             self.hue_shift,
             self.zValue(),
+            self.color_variant,
         )
 
     def apply_state(self, state):
@@ -573,8 +586,10 @@ class CharItem(QGraphicsPixmapItem):
             self.opacity,
             self.hue_shift,
             z_value,
+            color_variant,
         ) = state
-        if char != self.char:
+        if char != self.char or color_variant != self.color_variant:
+            self.color_variant = color_variant
             self.set_character(char)
         self.setZValue(z_value)
         self.setVisible(visible)
@@ -582,20 +597,22 @@ class CharItem(QGraphicsPixmapItem):
 
     def set_character(self, char):
         self.char = char
-        self.sprite = self._sprite_provider(char).convert("RGBA")
+        self.sprite = self._sprite_provider(char, self.color_variant).convert(
+            "RGBA"
+        )
         self._pix_cache.clear()
         self._hue_cache.clear()
 
-    def tinted_sprite(self):
+    def tinted_sprite(self, compute=False):
         if not self.hue_shift % 360:
             return self.sprite
         cached = self._hue_cache.get(self.hue_shift)
-        if cached is None:
+        if cached is None and compute:
             cached = shift_sprite_hue(self.sprite, self.hue_shift)
             if len(self._hue_cache) >= 8:
                 self._hue_cache.clear()
             self._hue_cache[self.hue_shift] = cached
-        return cached
+        return cached if cached is not None else self.sprite
 
     def _cache_key(self):
         return (
@@ -620,7 +637,10 @@ class CharItem(QGraphicsPixmapItem):
         key = self._cache_key()
         rendered = self._pix_cache.get(key)
         if rendered is None:
-            if self._dispatcher is not None and self.rotation % 90:
+            hue_pending = bool(self.hue_shift % 360) and (
+                self.hue_shift not in self._hue_cache
+            )
+            if self._dispatcher is not None and (self.rotation % 90 or hue_pending):
                 self.setPixmap(
                     QPixmap.fromImage(
                         ImageQt.ImageQt(
@@ -643,7 +663,7 @@ class CharItem(QGraphicsPixmapItem):
                 self._dispatcher.request(self, key)
                 return
             rendered = render_character(
-                self.tinted_sprite(),
+                self.tinted_sprite(compute=True),
                 self.scale_pct,
                 self.rotation,
                 self.rotation_quality,
@@ -661,7 +681,7 @@ class CharItem(QGraphicsPixmapItem):
         self._after_pixmap_change()
 
     def apply_rendered(self, sprite, key, rendered):
-        if sprite is not self.tinted_sprite():
+        if sprite is not self.sprite:
             return
         if len(self._pix_cache) >= PIX_CACHE_MAX_ENTRIES:
             self._pix_cache.clear()
@@ -1236,10 +1256,10 @@ class EditorScene(QGraphicsScene):
         self._band.setPen(pen)
 
     def _marquee_target(self, scene_pos):
-        views = self.views()
-        transform = views[0].transform() if views else QTransform()
-        item = self.itemAt(scene_pos, transform)
-        return item if isinstance(item, CharItem) and item.isVisible() else None
+        for item in self.items(scene_pos):
+            if isinstance(item, CharItem):
+                return item if item.isVisible() else None
+        return None
 
     def _start_marquee(self, event):
         self._band_start = QPointF(event.scenePos())
@@ -1766,6 +1786,7 @@ class AdvancedEditorDialog(QDialog):
 
         self.undo_stack = UndoStack()
         self._char_cache = {}
+        self._color_paths = {params["color"]: self.font_paths}
         self._dirty = False
         self._exported_signature = None
         self._fitted = False
@@ -1812,7 +1833,13 @@ class AdvancedEditorDialog(QDialog):
         self.items = []
         for char, sprite, x, y in placements:
             item = CharItem(
-                char, sprite, x, y, self._sprite_provider, self._render_dispatcher
+                char,
+                sprite,
+                x,
+                y,
+                self._sprite_provider,
+                self._render_dispatcher,
+                self.params["color"],
             )
             item.update_pixmap()
             self.scene.addItem(item)
@@ -1888,6 +1915,7 @@ class AdvancedEditorDialog(QDialog):
         panel_layout.addStretch()
 
         for first, second in (
+            (self.item_color_combo, self.offset_x_spin),
             (self.offset_x_spin, self.offset_y_spin),
             (self.offset_y_spin, self.scale_slider),
             (self.scale_slider, self.scale_spin),
@@ -2109,7 +2137,9 @@ Keys
 Panels
 
 - Font color switches every character to another color
-  palette of the same font.
+  palette of the same font; the Color field in Character
+  Controls switches only the selected characters, and Reset
+  brings back their original colors.
 - Character Controls edits the current selection. The controls
   stay disabled while nothing is selected. The quick buttons:
   Middle moves the selection to the middle of the image, Reset
@@ -2186,6 +2216,22 @@ Panels
         self.selection_label = QLabel("Nothing selected")
         self.selection_label.setWordWrap(True)
         form.addRow(self.selection_label)
+
+        self.item_color_combo = QComboBox()
+        colors = get_font_colors(self.params["font"])
+        self.item_color_combo.blockSignals(True)
+        self.item_color_combo.addItems(colors)
+        if self.params.get("color") in colors:
+            self.item_color_combo.setCurrentText(self.params["color"])
+        self.item_color_combo.blockSignals(False)
+        self.item_color_combo.setToolTip(
+            "Switch the selected characters to another color palette "
+            "of this font."
+        )
+        self.item_color_combo.currentTextChanged.connect(
+            self._on_item_color_changed
+        )
+        form.addRow("Color:", self.item_color_combo)
 
         self.offset_x_spin = QSpinBox()
         self.offset_x_spin.setRange(-5000, 5000)
@@ -2573,6 +2619,7 @@ Panels
                 item.base_y + DUPLICATE_OFFSET,
                 self._sprite_provider,
                 self._render_dispatcher,
+                item.color_variant,
             )
             ni.layout_anchored = False
             ni.dx = item.dx
@@ -2746,11 +2793,15 @@ Panels
             self.opacity_spin,
             self.hue_slider,
             self.hue_spin,
+            self.item_color_combo,
         ):
             widget.blockSignals(True)
         try:
             if selected:
                 first = selected[0]
+                self.item_color_combo.setCurrentText(
+                    first.color_variant or self.params["color"]
+                )
                 self._set_spin_clamped(self.offset_x_spin, round(first.dx))
                 self._set_spin_clamped(self.offset_y_spin, round(first.dy))
                 self.scale_slider.setValue(first.scale_pct)
@@ -2777,6 +2828,7 @@ Panels
                 self.opacity_spin,
                 self.hue_slider,
                 self.hue_spin,
+                self.item_color_combo,
             ):
                 widget.blockSignals(False)
 
@@ -2794,6 +2846,7 @@ Panels
             self.opacity_spin,
             self.hue_slider,
             self.hue_spin,
+            self.item_color_combo,
             self.rotation_quality,
         ):
             widget.setEnabled(has_selection)
@@ -2833,7 +2886,7 @@ Panels
             new_cy = cy + (rect.center().y() - cy) * factor
             item.scale_pct = value
             rendered = render_character(
-                item.tinted_sprite(),
+                item.tinted_sprite(compute=True),
                 value,
                 item.rotation,
                 item.rotation_quality,
@@ -3007,18 +3060,42 @@ Panels
         self._push(before)
         self._sync_panel()
 
-    def _sprite_for(self, char):
-        if char not in self._char_cache:
-            self._char_cache[char] = create_character_image(char, self.font_paths)
-        return self._char_cache[char]
+    def _sprite_for(self, char, color_variant=None):
+        color = color_variant or self.params["color"]
+        cache_key = (char, color)
+        if cache_key not in self._char_cache:
+            paths = self._color_paths.get(color)
+            if paths is None:
+                paths = get_font_paths(self.params["font"], color)
+                self._color_paths[color] = paths
+            self._char_cache[cache_key] = create_character_image(char, paths)
+        return self._char_cache[cache_key]
 
     def _on_font_color_changed(self, color):
         self.params["color"] = color
-        self.font_paths = get_font_paths(self.params["font"], color)
-        self._char_cache.clear()
+        if color not in self._color_paths:
+            self._color_paths[color] = get_font_paths(self.params["font"], color)
+        self.font_paths = self._color_paths[color]
         for item in self.items:
+            item.color_variant = color
             item.set_character(item.char)
             item.update_pixmap()
+        self._sync_panel()
+
+    def _on_item_color_changed(self, color):
+        selected = [item for item in self._selected() if item.isVisible()]
+        if not selected:
+            return
+        before = self._snapshot_selected()
+        if color not in self._color_paths:
+            self._color_paths[color] = get_font_paths(self.params["font"], color)
+        for item in selected:
+            if item.color_variant == color:
+                continue
+            item.color_variant = color
+            item.set_character(item.char)
+            item.update_pixmap()
+        self._push(before)
         self._sync_panel()
 
     def _edit_character(self, item):
@@ -3101,8 +3178,13 @@ Panels
                 x += rendered.width + self.letter_spacing
                 continue
             ni = CharItem(
-                ch, sprite, x, bottom - rendered.height, self._sprite_provider,
+                ch,
+                sprite,
+                x,
+                bottom - rendered.height,
+                self._sprite_provider,
                 self._render_dispatcher,
+                item.color_variant,
             )
             ni.layout_anchored = False
             ni.scale_pct = item.scale_pct
@@ -3369,7 +3451,7 @@ Panels
             rendered = item._pix_cache.get(key)
             if rendered is None:
                 rendered = render_character(
-                    item.tinted_sprite(),
+                    item.tinted_sprite(compute=True),
                     item.scale_pct,
                     item.rotation,
                     item.rotation_quality,

@@ -1058,7 +1058,8 @@ def test_cache_key_includes_opacity_and_hue(qapp, tmp_path):
         item.opacity = 50
         item.hue_shift = 90
         assert item._cache_key() != key
-        assert item.tinted_sprite() is not item.sprite
+        assert item.tinted_sprite(compute=True) is not item.sprite
+        assert item.tinted_sprite() is item.tinted_sprite(compute=True)
         item.hue_shift = 0
         assert item.tinted_sprite() is item.sprite
     finally:
@@ -1541,6 +1542,61 @@ def test_transform_box_hides_while_marquee_drag_active(qapp, tmp_path):
         dialog.scene.cancel_marquee()
         dialog.scene.transform_box.refresh()
         assert dialog.scene.transform_box._rect_item.isVisible()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_dragging_selected_item_moves_instead_of_marquee(qapp, tmp_path):
+    from PySide6.QtTest import QTest
+
+    dialog = make_dialog(tmp_path)
+    try:
+        view = dialog.view
+        item = dialog.items[1]
+        item.setSelected(True)
+        dialog.scene.transform_box.refresh()
+        center = dialog.scene._item_scene_rect(item).center()
+        start = view.mapFromScene(center)
+        end = view.mapFromScene(center + QPointF(20, 0))
+        QTest.mousePress(view.viewport(), Qt.LeftButton, pos=start)
+        assert dialog.scene._band_start is None
+        QTest.mouseMove(view.viewport(), end)
+        QTest.mouseRelease(view.viewport(), Qt.LeftButton, pos=end)
+        assert item.pos().x() != 34
+        assert dialog.scene._band_start is None
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_per_character_color_variant(qapp, tmp_path):
+    from image_generation import get_font_colors
+
+    dialog = make_dialog(tmp_path)
+    try:
+        colors = get_font_colors(1)
+        if len(colors) < 2:
+            return
+        a, b = dialog.items[0], dialog.items[1]
+        target = next(color for color in colors if color != "Blue")
+        b.setSelected(True)
+        dialog.item_color_combo.setCurrentText(target)
+        assert b.color_variant == target
+        assert a.color_variant == "Blue"
+        before_b = set(b.sprite.get_flattened_data())
+        assert before_b != set(a.sprite.get_flattened_data())
+        dialog._undo()
+        assert b.color_variant == "Blue"
+        assert set(b.sprite.get_flattened_data()) == set(
+            a.sprite.get_flattened_data()
+        )
+        b.setSelected(True)
+        dialog.item_color_combo.setCurrentText(target)
+        dialog._duplicate_selection()
+        duplicate = dialog.items[-1]
+        assert duplicate.color_variant == target
+        dialog._undo()
     finally:
         dialog._dirty = False
         dialog.close()
