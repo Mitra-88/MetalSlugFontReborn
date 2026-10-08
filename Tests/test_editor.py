@@ -15,6 +15,14 @@ def make_params(tmp_path):
     }
 
 
+class _FakeRelease:
+    def __init__(self, modifiers):
+        self._modifiers = modifiers
+
+    def modifiers(self):
+        return self._modifiers
+
+
 def make_dialog(tmp_path):
     return AdvancedEditorDialog(None, make_params(tmp_path), get_font_charset(1))
 
@@ -1437,6 +1445,102 @@ def test_font_color_combo_recolors_every_character(qapp, tmp_path):
         assert before != after
         dialog.font_color_combo.setCurrentText("Blue")
         assert set(item.sprite.get_flattened_data()) == before
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_marquee_previews_selection_while_dragging(qapp, tmp_path):
+    from PySide6.QtTest import QTest
+
+    dialog = make_dialog(tmp_path)
+    try:
+        view = dialog.view
+        first, second = dialog.items[0], dialog.items[1]
+        second.dx += 200
+        second._place()
+        band = first.sceneBoundingRect()
+        press_at = view.mapFromScene(band.topLeft() - QPointF(5, 5))
+        release_at = view.mapFromScene(band.bottomRight() + QPointF(5, 5))
+        QTest.mousePress(view.viewport(), Qt.LeftButton, pos=press_at)
+        dialog.scene._update_marquee(
+            view.mapToScene(release_at), Qt.NoModifier
+        )
+        previews = [
+            item
+            for item in dialog.scene._preview_pool
+            if item.isVisible()
+        ]
+        assert len(previews) == 1
+        assert previews[0].rect() == first.sceneBoundingRect()
+        assert not first.isSelected()
+        dialog.scene._finish_marquee(
+            _FakeRelease(Qt.NoModifier)
+        )
+        assert first.isSelected()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_marquee_preview_respects_shift_and_alt(qapp, tmp_path):
+    from PySide6.QtTest import QTest
+
+    dialog = make_dialog(tmp_path)
+    try:
+        view = dialog.view
+        first, second = dialog.items[0], dialog.items[1]
+        second.dx += 200
+        second._place()
+        first.setSelected(True)
+
+        band = second.sceneBoundingRect()
+        press_at = view.mapFromScene(band.topLeft() - QPointF(5, 5))
+        release_at = view.mapFromScene(band.bottomRight() + QPointF(5, 5))
+        QTest.mousePress(view.viewport(), Qt.LeftButton, pos=press_at)
+        dialog.scene._update_marquee(
+            view.mapToScene(release_at), Qt.KeyboardModifier.ShiftModifier
+        )
+        visible = [
+            item for item in dialog.scene._preview_pool if item.isVisible()
+        ]
+        assert len(visible) == 2
+        dialog.scene._update_marquee(
+            view.mapToScene(release_at), Qt.KeyboardModifier.AltModifier
+        )
+        visible = [
+            item for item in dialog.scene._preview_pool if item.isVisible()
+        ]
+        assert len(visible) == 1
+        assert visible[0].rect() == first.sceneBoundingRect()
+        dialog.scene.cancel_marquee()
+        assert not any(
+            item.isVisible() for item in dialog.scene._preview_pool
+        )
+        assert first.isSelected()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_transform_box_hides_while_marquee_drag_active(qapp, tmp_path):
+    from PySide6.QtTest import QTest
+
+    dialog = make_dialog(tmp_path)
+    try:
+        view = dialog.view
+        first = dialog.items[0]
+        first.setSelected(True)
+        dialog.scene.transform_box.refresh()
+        assert dialog.scene.transform_box._rect_item.isVisible()
+        band = first.sceneBoundingRect()
+        pos = view.mapFromScene(band.center() + QPointF(60, 0))
+        QTest.mousePress(view.viewport(), Qt.LeftButton, pos=pos)
+        assert dialog.scene._band_start is not None
+        assert not dialog.scene.transform_box._rect_item.isVisible()
+        dialog.scene.cancel_marquee()
+        dialog.scene.transform_box.refresh()
+        assert dialog.scene.transform_box._rect_item.isVisible()
     finally:
         dialog._dirty = False
         dialog.close()

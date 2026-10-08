@@ -770,7 +770,11 @@ class TransformBox:
 
     def _attached_items(self):
         dialog = self._scene.parent_dialog
-        if dialog is None or dialog._drag_before is not None:
+        if (
+            dialog is None
+            or dialog._drag_before is not None
+            or self._scene._band_start is not None
+        ):
             return []
         return [item for item in self._scene.ordered_selection() if item.isVisible()]
 
@@ -1152,6 +1156,8 @@ class EditorScene(QGraphicsScene):
         self._checker_cache = None
         self._band_start = None
         self._ant_offset = 0.0
+        self._preview_pool = []
+        self._preview_key = None
         self._band = QGraphicsRectItem()
         self._apply_band_palette()
         self._band.setZValue(1002)
@@ -1172,6 +1178,56 @@ class EditorScene(QGraphicsScene):
         fill = QApplication.palette().color(QPalette.ColorRole.Highlight)
         fill.setAlpha(40)
         self._band.setBrush(fill)
+        for preview in self._preview_pool:
+            preview.setPen(pen)
+            preview.setBrush(fill)
+
+    def _preview_pool_items(self, count):
+        while len(self._preview_pool) < count:
+            preview = QGraphicsRectItem()
+            preview.setPen(self._band.pen())
+            preview.setBrush(self._band.brush())
+            preview.setZValue(1001.5)
+            preview.hide()
+            self.addItem(preview)
+            self._preview_pool.append(preview)
+        return self._preview_pool
+
+    def _update_preview(self, modifiers):
+        dialog = self.parent_dialog
+        if dialog is None:
+            return
+        rect = self._band.rect()
+        hits = {
+            id(item)
+            for item in dialog.items
+            if item.isVisible() and item.sceneBoundingRect().intersects(rect)
+        }
+        selected_ids = {id(item) for item in dialog.items if item.isSelected()}
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            preview_ids = selected_ids | hits
+        elif modifiers & Qt.KeyboardModifier.AltModifier:
+            preview_ids = selected_ids - hits
+        else:
+            preview_ids = hits
+        key = tuple(sorted(preview_ids))
+        if key == self._preview_key:
+            return
+        self._preview_key = key
+        ordered = [
+            item for item in dialog.items if id(item) in preview_ids
+        ]
+        pool = self._preview_pool_items(len(ordered))
+        for preview, item in zip(pool, ordered):
+            preview.setRect(item.sceneBoundingRect())
+            preview.show()
+        for spare in pool[len(ordered):]:
+            spare.hide()
+
+    def _hide_preview(self):
+        self._preview_key = None
+        for preview in self._preview_pool:
+            preview.hide()
 
     def _march_ants(self):
         self._ant_offset = (self._ant_offset + 1) % (MARQUEE_DASH[0] + MARQUEE_DASH[1])
@@ -1190,16 +1246,20 @@ class EditorScene(QGraphicsScene):
         self._band.setRect(self._band_start.x(), self._band_start.y(), 0, 0)
         self._band.show()
         self._ant_timer.start()
+        self._hide_preview()
+        self.transform_box.hide()
         event.accept()
 
-    def _update_marquee(self, scene_pos):
+    def _update_marquee(self, scene_pos, modifiers=Qt.KeyboardModifier.NoModifier):
         self._band.setRect(QRectF(self._band_start, scene_pos).normalized())
+        self._update_preview(modifiers)
 
     def _finish_marquee(self, event):
         self._band_start = None
         rect = self._band.rect()
         self._band.hide()
         self._ant_timer.stop()
+        self._hide_preview()
         dialog = self.parent_dialog
         if dialog is None:
             return
@@ -1238,6 +1298,7 @@ class EditorScene(QGraphicsScene):
             return False
         self._band_start = None
         self._band.hide()
+        self._hide_preview()
         self._ant_timer.stop()
         return True
 
@@ -1279,7 +1340,7 @@ class EditorScene(QGraphicsScene):
 
     def mouseMoveEvent(self, event):
         if self._band_start is not None:
-            self._update_marquee(event.scenePos())
+            self._update_marquee(event.scenePos(), event.modifiers())
             event.accept()
             return
         if self.transform_box._gesture is not None:
@@ -2018,10 +2079,11 @@ Mouse
 - Hold Alt or Ctrl while dragging or transforming to suspend
   snapping.
 - Drag on empty space for an Aseprite-style marquee: the dashed
-  rectangle selects every character it touches. Hold Shift to
-  add to the selection and Alt to subtract from it. A plain
-  click on empty space clears the selection, Escape cancels a
-  marquee in progress.
+  rectangle selects every character it touches, and characters
+  light up under the band while you drag so you can see the
+  selection before releasing. Hold Shift to add to the selection
+  and Alt to subtract from it. A plain click on empty space
+  clears the selection, Escape cancels a marquee in progress.
 - With a rotated character selected, the transform box tilts
   with it: the corner squares resize and the edge squares
   stretch along the character's own axes, with the opposite
