@@ -1,4 +1,4 @@
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 
 from editor import AdvancedEditorDialog
 from image_generation import get_font_charset
@@ -190,15 +190,12 @@ def test_character_controls_gate_on_selection(qapp, tmp_path):
     try:
         assert not dialog.offset_x_spin.isEnabled()
         assert not dialog.rotation_quality.isEnabled()
-        assert all(not btn.isEnabled() for btn in dialog._selection_action_buttons)
+        assert all(not btn.isEnabled() for btn in dialog._transform_buttons)
 
         dialog.items[0].setSelected(True)
         assert dialog.offset_x_spin.isEnabled()
         assert dialog.rotation_quality.isEnabled()
-        assert all(not btn.isEnabled() for btn in dialog._selection_action_buttons)
-
-        dialog.items[1].setSelected(True)
-        assert all(btn.isEnabled() for btn in dialog._selection_action_buttons)
+        assert all(btn.isEnabled() for btn in dialog._transform_buttons)
     finally:
         dialog.close()
 
@@ -326,7 +323,12 @@ def test_reset_transform_restores_defaults(qapp, tmp_path):
         item.stretch_x = 200
         item.rotation = 45
         item.flip_h = True
-        dialog._reset_transform_selection()
+        item.dx = 40
+        item.dy = 12
+        item.opacity = 30
+        item.hue_shift = 90
+        item._place()
+        dialog._reset_to_original()
         assert (
             item.scale_pct,
             item.stretch_x,
@@ -334,10 +336,14 @@ def test_reset_transform_restores_defaults(qapp, tmp_path):
             item.rotation,
             item.flip_h,
             item.flip_v,
-        ) == (100, 100, 100, 0, False, False)
+            item.opacity,
+            item.hue_shift,
+        ) == (100, 100, 100, 0, False, False, 100, 0)
+        assert (item.dx, item.dy) == (0, 0)
         assert dialog.undo_stack.can_undo()
         dialog._undo()
         assert item.scale_pct == 250
+        assert (item.dx, item.dy) == (40, 12)
     finally:
         dialog._dirty = False
         dialog.close()
@@ -784,25 +790,27 @@ def test_scene_rect_tracks_nudged_items(qapp, tmp_path):
         dialog.close()
 
 
-def test_align_and_spread_keep_integer_positions(qapp, tmp_path):
+def test_middle_button_centers_selection_on_canvas(qapp, tmp_path):
 
     dialog = make_dialog(tmp_path)
     try:
         a, b = dialog.items[0], dialog.items[1]
-        b.scale_pct = 50
-        b.update_pixmap()
+        b.dx += 120
+        b._place()
         a.setSelected(True)
         b.setSelected(True)
-        for mode in ("left", "center", "right", "top", "middle", "bottom"):
-            dialog._align_selection(mode)
-            for item in (a, b):
-                assert item.pos().x() == int(item.pos().x()), (mode, item.pos())
-                assert item.pos().y() == int(item.pos().y()), (mode, item.pos())
-        dialog._distribute_selection("x")
-        dialog._distribute_selection("y")
+        union = QRectF(a.sceneBoundingRect()).united(b.sceneBoundingRect())
+        canvas_w, canvas_h = dialog.canvas_size
+        dialog._center_selection_on_canvas()
+        new_union = QRectF(a.sceneBoundingRect()).united(b.sceneBoundingRect())
+        assert abs(new_union.center().x() - canvas_w / 2) <= 1
+        assert abs(new_union.center().y() - canvas_h / 2) <= 1
         for item in (a, b):
             assert item.pos().x() == int(item.pos().x())
             assert item.pos().y() == int(item.pos().y())
+        dialog._undo()
+        restored = QRectF(a.sceneBoundingRect()).united(b.sceneBoundingRect())
+        assert restored.topLeft() == union.topLeft()
     finally:
         dialog._dirty = False
         dialog.close()
@@ -1066,7 +1074,7 @@ def test_opacity_and_hue_apply_slider_sync_and_undo(qapp, tmp_path):
         dialog._undo()
         assert item.opacity == 100
         dialog.opacity_spin.setValue(30)
-        dialog._reset_transform_selection()
+        dialog._reset_to_original()
         assert item.opacity == 100 and item.hue_shift == 0
     finally:
         dialog._dirty = False
@@ -1389,6 +1397,46 @@ def test_export_refuses_absurd_compositions_with_warning(qapp, tmp_path, monkeyp
         assert len(warnings) == 1
         assert warnings[0][0] == "Export Too Large"
         assert not list(tmp_path.iterdir())
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_zoom_entry_stays_compact_and_grows_with_text(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        entry = dialog.zoom_entry
+        base = entry.minimumWidth()
+        entry.set_zoom(2.0)
+        assert entry.minimumWidth() == base
+        assert entry.text() == "200%"
+        entry.set_zoom(64.0)
+        assert entry.minimumWidth() > base
+        assert entry.text() == "6400%"
+        entry.set_zoom(1.0)
+        assert entry.minimumWidth() == base
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_font_color_combo_recolors_every_character(qapp, tmp_path):
+    from image_generation import get_font_colors
+
+    dialog = make_dialog(tmp_path)
+    try:
+        colors = get_font_colors(1)
+        if len(colors) < 2:
+            return
+        item = dialog.items[0]
+        before = set(item.sprite.get_flattened_data())
+        target = next(color for color in colors if color != "Blue")
+        dialog.font_color_combo.setCurrentText(target)
+        after = set(item.sprite.get_flattened_data())
+        assert dialog.params["color"] == target
+        assert before != after
+        dialog.font_color_combo.setCurrentText("Blue")
+        assert set(item.sprite.get_flattened_data()) == before
     finally:
         dialog._dirty = False
         dialog.close()

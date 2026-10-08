@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
 from image_generation import (
     create_character_image,
     generate_filename,
+    get_font_colors,
     get_font_paths,
     layout_characters,
 )
@@ -1496,6 +1497,12 @@ class EditorScene(QGraphicsScene):
         menu.addAction("Duplicate", lambda: dialog._duplicate_selection())
         menu.addAction("Reset Scale", lambda: dialog._reset_item(item, "scale_pct"))
         menu.addAction("Reset Rotation", lambda: dialog._reset_item(item, "rotation"))
+        menu.addAction(
+            "Rotate 90° Counter-Clockwise", lambda: dialog._rotate_selection_90(-1)
+        )
+        menu.addAction(
+            "Rotate 90° Clockwise", lambda: dialog._rotate_selection_90(1)
+        )
         menu.addAction("Bring to Front", lambda: dialog._reorder_selection(True))
         menu.addAction("Send to Back", lambda: dialog._reorder_selection(False))
         menu.addAction("Delete Character", lambda: dialog._delete_items([item]))
@@ -1617,14 +1624,18 @@ class ZoomEntry(QLineEdit):
         self.setObjectName("ZoomEntry")
         self.setReadOnly(False)
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.setMinimumWidth(
-            self.fontMetrics().horizontalAdvance("99999%") + 16
-        )
         self.setToolTip("Zoom level: type a percentage and press Enter.")
         self.setAccessibleName("Zoom level")
         self.editingFinished.connect(self._commit)
+        self.textChanged.connect(self._sync_width)
         self._last = 1.0
         self.set_zoom(1.0)
+
+    def _sync_width(self):
+        metrics = self.fontMetrics()
+        text = self.text() or "100%"
+        reference = max(metrics.horizontalAdvance("100%"), metrics.horizontalAdvance(text))
+        self.setMinimumWidth(reference + 12)
 
     def set_zoom(self, scale):
         self._last = scale
@@ -1786,6 +1797,25 @@ class AdvancedEditorDialog(QDialog):
         splitter.addWidget(self.view)
         splitter.addWidget(panel_scroll)
         splitter.setStretchFactor(0, 1)
+
+        color_row = QHBoxLayout()
+        color_label = QLabel("Font color:")
+        self.font_color_combo = QComboBox()
+        colors = get_font_colors(self.params["font"])
+        self.font_color_combo.blockSignals(True)
+        self.font_color_combo.addItems(colors)
+        if self.params.get("color") in colors:
+            self.font_color_combo.setCurrentText(self.params["color"])
+        self.font_color_combo.blockSignals(False)
+        self.font_color_combo.setToolTip(
+            "Switch every character to another color palette of this font."
+        )
+        self.font_color_combo.currentTextChanged.connect(
+            self._on_font_color_changed
+        )
+        color_row.addWidget(color_label)
+        color_row.addWidget(self.font_color_combo, 1)
+        panel_layout.addLayout(color_row)
 
         panel_layout.addWidget(self._build_character_group())
         panel_layout.addWidget(self._build_global_group())
@@ -2016,16 +2046,20 @@ Keys
 
 Panels
 
+- Font color switches every character to another color
+  palette of the same font.
 - Character Controls edits the current selection. The controls
-  stay disabled while nothing is selected. The quick buttons
-  flip the selection, rotate it by exact 90 degrees, duplicate
-  it, raise or lower its draw order, or reset scale, stretch,
-  rotation, flips, opacity and hue.
+  stay disabled while nothing is selected. The quick buttons:
+  Middle moves the selection to the middle of the image, Reset
+  restores the selected characters to how they were when the
+  editor opened, Flip mirrors them, and Duplicate copies them.
 - Opacity blends the selected characters over what is behind
   them; Hue shift rotates their colors around the wheel while
   keeping white and black shades readable.
 - Spacing & Alignment re-lays out every visible character from
   the original text (spacing, vertical align, line align).
+- Right-click a character for duplicate, per-property resets,
+  exact 90 degree rotations, draw order and delete.
 """
 
     def _show_help(self):
@@ -2258,71 +2292,22 @@ Panels
         grid = QGridLayout(widget)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(4)
-        self._selection_action_buttons = []
         self._transform_buttons = []
-
-        align_label = QLabel("Align selection (needs 2+):")
-        grid.addWidget(align_label, 0, 0, 1, 4)
-
-        for column, (text, mode) in enumerate(
-            (
-                ("Left", "left"),
-                ("Center", "center"),
-                ("Right", "right"),
-            )
-        ):
-            btn = QPushButton(text)
-            btn.setToolTip(f"Align selected characters to the {mode} of the selection.")
-            btn.clicked.connect(lambda _, m=mode: self._align_selection(m))
-            grid.addWidget(btn, 1, column)
-            self._selection_action_buttons.append(btn)
-
-        for column, (text, mode) in enumerate(
-            (
-                ("Top", "top"),
-                ("Middle", "middle"),
-                ("Bottom", "bottom"),
-            )
-        ):
-            btn = QPushButton(text)
-            btn.setToolTip(f"Align selected characters to the {mode} of the selection.")
-            btn.clicked.connect(lambda _, m=mode: self._align_selection(m))
-            grid.addWidget(btn, 2, column)
-            self._selection_action_buttons.append(btn)
-
-        spread_h = QPushButton("Spread ↔")
-        spread_h.setToolTip(
-            "Distribute selected characters with even horizontal spacing."
-        )
-        spread_h.clicked.connect(lambda: self._distribute_selection("x"))
-        grid.addWidget(spread_h, 3, 0)
-        spread_v = QPushButton("Spread ↕")
-        spread_v.setToolTip(
-            "Distribute selected characters with even vertical spacing."
-        )
-        spread_v.clicked.connect(lambda: self._distribute_selection("y"))
-        grid.addWidget(spread_v, 3, 1)
-        self._selection_action_buttons.append(spread_h)
-        self._selection_action_buttons.append(spread_v)
 
         for column, (text, tip, handler) in enumerate(
             (
                 (
-                    "Reset",
-                    ("Reset scale, stretch, rotation, flips, opacity and "
-                     "hue; position is kept."),
-                    self._reset_transform_selection,
+                    "Middle",
+                    "Move the selected characters to the middle of the image.",
+                    self._center_selection_on_canvas,
                 ),
-            )
-        ):
-            btn = QPushButton(text)
-            btn.setToolTip(tip)
-            btn.clicked.connect(handler)
-            grid.addWidget(btn, 3, 2)
-            self._transform_buttons.append(btn)
-
-        for column, (text, tip, handler) in enumerate(
-            (
+                (
+                    "Reset",
+                    ("Restore the selected characters to how they were "
+                     "when the editor opened: position, size, rotation, "
+                     "flips, opacity and hue."),
+                    self._reset_to_original,
+                ),
                 (
                     "Flip ↔",
                     "Mirror the selected characters horizontally (exact pixels).",
@@ -2334,47 +2319,17 @@ Panels
                     lambda: self._flip_selection("v"),
                 ),
                 (
-                    "↺",
-                    "Rotate the selection 90 degrees counter-clockwise.",
-                    lambda: self._rotate_selection_90(-1),
-                ),
-                (
-                    "↻",
-                    "Rotate the selection 90 degrees clockwise.",
-                    lambda: self._rotate_selection_90(1),
-                ),
-            )
-        ):
-            btn = QPushButton(text)
-            btn.setToolTip(tip)
-            btn.clicked.connect(handler)
-            grid.addWidget(btn, 4, column)
-            self._transform_buttons.append(btn)
-
-        for column, (text, tip, handler) in enumerate(
-            (
-                (
                     "Duplicate",
                     ("Copy the selected characters next to the originals "
                      "(Ctrl+D)."),
                     self._duplicate_selection,
                 ),
-                (
-                    "To Front",
-                    "Draw the selected characters above everything else.",
-                    lambda: self._reorder_selection(True),
-                ),
-                (
-                    "To Back",
-                    "Draw the selected characters below everything else.",
-                    lambda: self._reorder_selection(False),
-                ),
             )
         ):
             btn = QPushButton(text)
             btn.setToolTip(tip)
             btn.clicked.connect(handler)
-            grid.addWidget(btn, 5, column)
+            grid.addWidget(btn, 0, column)
             self._transform_buttons.append(btn)
 
         return widget
@@ -2537,25 +2492,6 @@ Panels
             item.rotation = (
                 item.rotation + 90 * turns - ROTATION_MIN
             ) % span + ROTATION_MIN
-            item.update_pixmap()
-        self._push(before)
-        self._sync_panel()
-
-    def _reset_transform_selection(self):
-        selected = [item for item in self._selected() if item.isVisible()]
-        if not selected:
-            return
-        before = self._snapshot_selected()
-        for item in selected:
-            item.scale_pct = CHAR_SCALE_DEFAULT
-            item.stretch_x = CHAR_SCALE_DEFAULT
-            item.stretch_y = CHAR_SCALE_DEFAULT
-            item.rotation = 0
-            item.flip_h = False
-            item.flip_v = False
-            item.opacity = OPACITY_DEFAULT
-            item.hue_shift = 0
-            item.prune_cache()
             item.update_pixmap()
         self._push(before)
         self._sync_panel()
@@ -2799,9 +2735,6 @@ Panels
             self.rotation_quality,
         ):
             widget.setEnabled(has_selection)
-        multi = len(selected) >= 2
-        for btn in self._selection_action_buttons:
-            btn.setEnabled(multi)
         for btn in self._transform_buttons:
             btn.setEnabled(has_selection)
 
@@ -2962,63 +2895,37 @@ Panels
                 return candidate
         return value
 
-    def _align_selection(self, mode):
+    def _center_selection_on_canvas(self):
         items = [item for item in self._selected() if item.isVisible()]
-        if len(items) < 2:
+        if not items:
             return
         before = self._snapshot_selected()
-        rects = {item: self.scene._item_scene_rect(item) for item in items}
-        union = rects[items[0]]
-        for rect in rects.values():
-            union = union.united(rect)
-        for item, rect in rects.items():
-            if mode == "left":
-                ddx, ddy = union.left() - rect.left(), 0
-            elif mode == "right":
-                ddx, ddy = union.right() - rect.right(), 0
-            elif mode == "center":
-                ddx, ddy = union.center().x() - rect.center().x(), 0
-            elif mode == "top":
-                ddx, ddy = 0, union.top() - rect.top()
-            elif mode == "bottom":
-                ddx, ddy = 0, union.bottom() - rect.bottom()
-            else:
-                ddx, ddy = 0, union.center().y() - rect.center().y()
-            ddx, ddy = round(ddx), round(ddy)
-            if ddx or ddy:
-                item.dx += ddx
-                item.dy += ddy
-                item._place()
+        union = self.scene._item_scene_rect(items[0])
+        for item in items[1:]:
+            union = union.united(self.scene._item_scene_rect(item))
+        canvas_w, canvas_h = self.canvas_size
+        ddx = round(canvas_w / 2 - union.center().x())
+        ddy = round(canvas_h / 2 - union.center().y())
+        if not ddx and not ddy:
+            return
+        for item in items:
+            item.dx += ddx
+            item.dy += ddy
+            item._place()
         self._push(before)
         self._sync_panel()
 
-    def _distribute_selection(self, axis):
-        items = [item for item in self._selected() if item.isVisible()]
-        if len(items) < 3:
+    def _reset_to_original(self):
+        items = [
+            item
+            for item in self._selected()
+            if item.isVisible() and item in self._initial_signature
+        ]
+        if not items:
             return
         before = self._snapshot_selected()
-        rects = {item: self.scene._item_scene_rect(item) for item in items}
-        ordered = sorted(
-            items,
-            key=lambda it: (
-                rects[it].center().x() if axis == "x" else rects[it].center().y()
-            ),
-        )
-        first = rects[ordered[0]].center()
-        last = rects[ordered[-1]].center()
-        span = (last.x() - first.x()) if axis == "x" else (last.y() - first.y())
-        step = span / (len(ordered) - 1)
-        for index, item in enumerate(ordered[1:-1], start=1):
-            rect = rects[item]
-            if axis == "x":
-                delta = round(first.x() + index * step - rect.center().x())
-                if delta:
-                    item.dx += delta
-            else:
-                delta = round(first.y() + index * step - rect.center().y())
-                if delta:
-                    item.dy += delta
-            item._place()
+        for item in items:
+            item.apply_state(self._initial_signature[item])
         self._push(before)
         self._sync_panel()
 
@@ -3042,6 +2949,15 @@ Panels
         if char not in self._char_cache:
             self._char_cache[char] = create_character_image(char, self.font_paths)
         return self._char_cache[char]
+
+    def _on_font_color_changed(self, color):
+        self.params["color"] = color
+        self.font_paths = get_font_paths(self.params["font"], color)
+        self._char_cache.clear()
+        for item in self.items:
+            item.set_character(item.char)
+            item.update_pixmap()
+        self._sync_panel()
 
     def _edit_character(self, item):
         new_text, ok = QInputDialog.getText(
