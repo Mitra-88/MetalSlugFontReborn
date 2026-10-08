@@ -739,6 +739,10 @@ class CharItem(QGraphicsPixmapItem):
             scene = self.scene()
             if scene is not None:
                 scene.note_selection_change(self, bool(value))
+        elif change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            scene = self.scene()
+            if scene is not None:
+                scene.invalidate_bounds()
         return super().itemChange(change, value)
 
 
@@ -1735,28 +1739,44 @@ class ZoomEntry(QLineEdit):
         self._last = 1.0
         self.set_zoom(1.0)
 
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self.selectAll()
+
     def _sync_width(self):
         metrics = self.fontMetrics()
         text = self.text() or "100%"
-        reference = max(metrics.horizontalAdvance("100%"), metrics.horizontalAdvance(text))
-        self.setMinimumWidth(reference + 12)
+        reference = max(
+            metrics.horizontalAdvance("100%"), metrics.horizontalAdvance(text)
+        )
+        self.setMinimumWidth(reference + 20)
+
+    def restore_zoom(self):
+        self.setText(f"{round(self._last * 100)}%")
+        self.setModified(False)
+        self._sync_width()
 
     def set_zoom(self, scale):
         self._last = scale
-        if self.hasFocus():
+        if self.hasFocus() and self.isModified():
             return
         self.setText(f"{round(scale * 100)}%")
+        self.setModified(False)
+        self._sync_width()
 
     def _commit(self):
         text = self.text().strip().rstrip("%").strip()
         try:
             percent = float(text)
         except ValueError:
-            self.set_zoom(self._last)
+            self.restore_zoom()
             return
         scale = max(ZOOM_SCALES[0], min(ZOOM_SCALES[-1], percent / 100))
         nearest = min(ZOOM_SCALES, key=lambda entry: abs(entry - scale))
         self.zoom_committed.emit(nearest)
+        self.setText(f"{round(nearest * 100)}%")
+        self.setModified(False)
+        self._sync_width()
 
 
 class UndoStack:
@@ -2175,6 +2195,9 @@ Panels
   the original text (spacing, vertical align, line align).
 - Right-click a character for duplicate, per-property resets,
   exact 90 degree rotations, draw order and delete.
+- Canvas size sets the image to an exact size; Crop to Content
+  shrinks it tightly around the visible characters, cutting
+  empty margins. Both are undoable.
 """
 
     def _show_help(self):
@@ -2524,6 +2547,33 @@ Panels
         )
         self.snap_spin.valueChanged.connect(self._on_snap_changed)
         form.addRow("Grid size:", self.snap_spin)
+
+        canvas_w, canvas_h = (round(value) for value in self.canvas_size)
+        self.canvas_w_spin = QSpinBox()
+        self.canvas_w_spin.setRange(1, 10000)
+        self.canvas_w_spin.setValue(canvas_w)
+        self.canvas_w_spin.setToolTip("Image width in pixels.")
+        self.canvas_h_spin = QSpinBox()
+        self.canvas_h_spin.setRange(1, 10000)
+        self.canvas_h_spin.setValue(canvas_h)
+        self.canvas_h_spin.setToolTip("Image height in pixels.")
+        apply_canvas_btn = QPushButton("Apply")
+        apply_canvas_btn.setToolTip("Resize the image to the given size.")
+        apply_canvas_btn.clicked.connect(self._apply_canvas_size)
+        crop_btn = QPushButton("Crop to Content")
+        crop_btn.setToolTip(
+            "Shrink the image so it tightly fits the visible "
+            "characters, cutting empty margins."
+        )
+        crop_btn.clicked.connect(self._crop_to_content)
+        canvas_row = QHBoxLayout()
+        canvas_row.setSpacing(4)
+        canvas_row.addWidget(self.canvas_w_spin, 1)
+        canvas_row.addWidget(QLabel("x"))
+        canvas_row.addWidget(self.canvas_h_spin, 1)
+        canvas_row.addWidget(apply_canvas_btn)
+        canvas_row.addWidget(crop_btn)
+        form.addRow("Canvas size:", canvas_row)
 
         self._set_group_children_visible(group, group.isChecked())
         return group
@@ -3325,9 +3375,7 @@ Panels
                     widget.setCurrentText(value)
                 widget.blockSignals(False)
         if canvas != self.canvas_size:
-            self.canvas_size = canvas
-            self.canvas_rect.setRect(0, 0, *canvas)
-            self._update_scene_rect()
+            self._set_canvas_size(*canvas)
         for item, state in snapshot.items():
             item.apply_state(state)
             if not state[6] and item.isSelected():
@@ -3387,8 +3435,7 @@ Panels
             baseline=self.baseline,
             align=self.align,
         )
-        self.canvas_size = (canvas_w, canvas_h)
-        self.canvas_rect.setRect(0, 0, canvas_w, canvas_h)
+        self._set_canvas_size(canvas_w, canvas_h)
         layout_items = [it for it in self.items if it.layout_anchored]
         for item, (_char, _sprite, x, y) in zip(layout_items, placements):
             item.set_base(x, y)
@@ -3401,6 +3448,71 @@ Panels
             layout_after=self._layout_params(),
         )
         self._update_status_counts()
+
+    def _set_canvas_size(self, width, height):
+        self.canvas_size = (width, height)
+        self.canvas_rect.setRect(0, 0, width, height)
+        for spin, value in (
+            (self.canvas_w_spin, width),
+            (self.canvas_h_spin, height),
+        ):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        self.scene.invalidate_bounds()
+        self._update_scene_rect()
+        self._update_status_counts()
+
+    def _apply_canvas_size(self):
+        width = self.canvas_w_spin.value()
+        height = self.canvas_h_spin.value()
+        if (width, height) == (round(self.canvas_size[0]), round(self.canvas_size[1])):
+            return
+        before = self._capture_all()
+        canvas_before = tuple(self.canvas_size)
+        self._set_canvas_size(width, height)
+        self._push(
+            before,
+            canvas_before=canvas_before,
+            canvas_after=(width, height),
+        )
+
+    def _crop_to_content(self):
+        items = [item for item in self.items if item.isVisible()]
+        if not items:
+            QMessageBox.information(
+                self,
+                "Nothing to Crop To",
+                "Every character is hidden, so there is no content to "
+                "crop the image to.",
+            )
+            return
+        union = self.scene._item_scene_rect(items[0])
+        for item in items[1:]:
+            union = union.united(self.scene._item_scene_rect(item))
+        left = max(0, floor(union.left()))
+        top = max(0, floor(union.top()))
+        width = max(1, ceil(union.right()) - left)
+        height = max(1, ceil(union.bottom()) - top)
+        canvas_before = tuple(self.canvas_size)
+        if (width, height, left, top) == (
+            round(canvas_before[0]),
+            round(canvas_before[1]),
+            0,
+            0,
+        ):
+            return
+        before = self._capture_all()
+        for item in self.items:
+            item.base_x -= left
+            item.base_y -= top
+            item._place()
+        self._set_canvas_size(width, height)
+        self._push(
+            before,
+            canvas_before=canvas_before,
+            canvas_after=(width, height),
+        )
 
     def _on_snap_changed(self, value):
         self.snap_grid = value

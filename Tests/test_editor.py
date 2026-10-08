@@ -1651,3 +1651,80 @@ def test_slider_gesture_commit_keeps_panel_and_scene_consistent(qapp, tmp_path):
     finally:
         dialog._dirty = False
         dialog.close()
+
+
+def test_drag_position_changes_keep_bounds_fresh(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        scene = dialog.scene
+        item = dialog.items[-1]
+        before = scene._background_bounds()
+        item.setPos(item.pos().x() + 300, item.pos().y())
+        assert scene._background_bounds().right() > before.right()
+        item.moveBy(100, 0)
+        assert scene._background_bounds().right() > before.right() + 100
+        grown = scene._background_bounds()
+        item.setVisible(False)
+        assert scene._background_bounds().right() < grown.right()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_zoom_entry_updates_while_focused_until_user_types(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        entry = dialog.zoom_entry
+        entry.setFocus()
+        qapp.processEvents()
+        entry.hasFocus = lambda: True
+        entry.set_zoom(4.0)
+        assert entry.text() == "400%"
+        entry.setText("900")
+        entry.setModified(True)
+        entry.set_zoom(2.0)
+        assert entry.text() == "900"
+        entry._commit()
+        assert dialog.view.transform().m11() == 8.0
+        assert entry.text() == "800%"
+        assert not entry.isModified()
+        entry.setText("nonsense")
+        entry.setModified(True)
+        entry._commit()
+        assert entry.text() == "800%"
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_canvas_size_apply_and_crop_to_content(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        canvas_w, canvas_h = (round(value) for value in dialog.canvas_size)
+        item = dialog.items[0]
+        item.setSelected(True)
+        item.dx += 60
+        item.dy += 40
+        item._place()
+        dialog._crop_to_content()
+        crop_w, crop_h = dialog.canvas_size
+        assert crop_w < canvas_w or crop_h < canvas_h
+        assert crop_w >= 1 and crop_h >= 1
+        rect = dialog.scene._item_scene_rect(item)
+        assert rect.left() >= -1 and rect.top() >= -1
+        assert dialog.canvas_w_spin.value() == crop_w
+        assert dialog.canvas_h_spin.value() == crop_h
+        dialog._undo()
+        assert tuple(dialog.canvas_size) == (canvas_w, canvas_h)
+        assert item.dx == 60 and item.dy == 40
+        dialog.canvas_w_spin.setValue(canvas_w + 50)
+        dialog.canvas_h_spin.setValue(canvas_h + 25)
+        dialog._apply_canvas_size()
+        assert tuple(dialog.canvas_size) == (canvas_w + 50, canvas_h + 25)
+        dialog._undo()
+        assert tuple(dialog.canvas_size) == (canvas_w, canvas_h)
+    finally:
+        dialog._dirty = False
+        dialog.close()
