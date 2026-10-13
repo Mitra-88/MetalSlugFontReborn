@@ -36,7 +36,7 @@ jobs:
         run: uv python install 3.15
 
       - name: Restore uv cache
-        uses: actions/cache@v6
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
         with:
           path: ~\AppData\Local\uv\cache
           key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
@@ -80,7 +80,7 @@ jobs:
           mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: MetalSlugFontReborn-${{ steps.sha.outputs.short_sha }}-Windows-x64
           path: dist/MetalSlugFontReborn
@@ -103,7 +103,7 @@ jobs:
         run: uv python install 3.15
 
       - name: Restore uv cache
-        uses: actions/cache@v6
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
         with:
           path: ~/.cache/uv
           key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
@@ -146,7 +146,7 @@ jobs:
           mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: MetalSlugFontReborn-${{ steps.sha.outputs.short_sha }}-Linux-x64
           path: dist/MetalSlugFontReborn
@@ -169,7 +169,7 @@ jobs:
         run: uv python install 3.15
 
       - name: Restore uv cache
-        uses: actions/cache@v6
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
         with:
           path: ~/Library/Caches/uv
           key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
@@ -212,7 +212,7 @@ jobs:
           mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: MetalSlugFontReborn-${{ steps.sha.outputs.short_sha }}-macOS-ARM64
           path: dist/MetalSlugFontReborn
@@ -239,7 +239,7 @@ jobs:
         run: uv venv --python 3.15
 
       - name: Restore uv cache
-        uses: actions/cache@v6
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
         with:
           path: ~\AppData\Local\uv\cache
           key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
@@ -277,7 +277,7 @@ jobs:
           esac
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: MSFRProfiler-${{ steps.sha.outputs.short_sha }}-Windows-x64
           path: dist/MSFRProfiler
