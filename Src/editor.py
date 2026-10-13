@@ -1167,7 +1167,7 @@ class TransformBox:
             item._place()
 
 
-HANDLE_FRACTIONS = {
+HANDLE_FRACTIONS = frozendict({
     "nw": (0.0, 0.0),
     "n": (0.5, 0.0),
     "ne": (1.0, 0.0),
@@ -1176,7 +1176,7 @@ HANDLE_FRACTIONS = {
     "sw": (0.0, 1.0),
     "s": (0.5, 1.0),
     "se": (1.0, 1.0),
-}
+})
 
 
 class EditorScene(QGraphicsScene):

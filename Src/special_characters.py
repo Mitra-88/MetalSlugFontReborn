@@ -1,4 +1,4 @@
-special_characters = {
+special_characters = frozendict({
     "!": "Exclamation",
     "?": "Question",
     "'": "Apostrophe",
@@ -43,4 +43,4 @@ special_characters = {
     "♪": "Musical-Note",
     "︷": "Up-Arrow",
     "✖": "Cross",
-}
+})
