@@ -50,3 +50,7 @@ def test_join_parts_skips_missing_values():
 def test_get_system_info_returns_non_empty_string():
     info = get_system_info()
     assert isinstance(info, str) and info
+
+
+def test_get_system_info_is_cached():
+    assert get_system_info() is get_system_info()

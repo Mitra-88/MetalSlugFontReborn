@@ -386,7 +386,7 @@ def build_supported_characters_markdown():
             "",
             f"- **Letters:** {describe_letter_case(chars)}",
             f"- **Numbers:** {describe_numbers(chars)}",
-            f"- **Symbols:** {symbols or 'None'}",
+            f"- **Symbols:** {' '.join(f'`{ch}`' for ch in symbols) or 'None'}",
             f"- **Colors:** {', '.join(get_font_colors(font))}",
         ]
     return "\n".join(lines)

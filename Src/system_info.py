@@ -5,6 +5,7 @@ import platform
 import subprocess
 import sys
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from time import time
 
@@ -117,6 +118,7 @@ def get_macos_version() -> str | None:
     return info.get("ProductUserVisibleVersion")
 
 
+@lru_cache(maxsize=1)
 def get_system_info() -> str:
     system = platform.system()
     arch = normalize_architecture(platform.machine())

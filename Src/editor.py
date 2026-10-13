@@ -1885,6 +1885,8 @@ class AdvancedEditorDialog(QDialog):
         self._build_ui()
         self._connect_selection()
         self._install_shortcuts()
+        for button in self.findChildren(QPushButton):
+            button.setAutoDefault(False)
         self._sync_panel()
         self._initial_signature = self._capture_all()
 

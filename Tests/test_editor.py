@@ -2042,3 +2042,25 @@ def test_scale_positions_survive_lagged_renders(qapp, tmp_path):
     finally:
         dialog._dirty = False
         dialog.close()
+
+
+def test_enter_key_does_not_close_the_editor(qapp, tmp_path):
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QPushButton
+
+    dialog = make_dialog(tmp_path)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        assert dialog.isVisible()
+        for button in dialog.findChildren(QPushButton):
+            assert not button.autoDefault()
+        QTest.keyClick(dialog, Qt.Key_Return)
+        qapp.processEvents()
+        assert dialog.isVisible()
+        QTest.keyClick(dialog, Qt.Key_Enter)
+        qapp.processEvents()
+        assert dialog.isVisible()
+    finally:
+        dialog._dirty = False
+        dialog.close()
