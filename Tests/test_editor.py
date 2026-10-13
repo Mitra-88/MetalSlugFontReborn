@@ -1971,7 +1971,74 @@ def test_editor_save_prompt_respects_skip_flag(qapp, tmp_path, monkeypatch):
         dialog.close()
 
 
-def test_help_text_stays_screen_sized():
+def test_help_text_has_html_sections():
     from editor import AdvancedEditorDialog
 
-    assert len(AdvancedEditorDialog.HELP_TEXT.splitlines()) <= 44
+    assert AdvancedEditorDialog.HELP_TEXT.count("<h3>") == 3
+    assert "<b>Marquee:</b>" in AdvancedEditorDialog.HELP_TEXT
+    assert "<b>Ctrl+S</b>" in AdvancedEditorDialog.HELP_TEXT
+
+
+def test_editor_window_allows_maximizing(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        flags = dialog.windowFlags()
+        assert flags & Qt.WindowType.Window
+        assert flags & Qt.WindowType.WindowMaximizeButtonHint
+        assert flags & Qt.WindowType.WindowMinimizeButtonHint
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_scale_positions_survive_lagged_renders(qapp, tmp_path):
+    from editor import render_character
+
+    dialog = make_dialog(tmp_path)
+    try:
+        first, second = dialog.items[0], dialog.items[1]
+        for item in (first, second):
+            item.setSelected(True)
+        dispatcher = _RecordingDispatcher()
+        for item in (first, second):
+            item._dispatcher = dispatcher
+
+        def model(item):
+            (w, h), _ = dialog._item_size(item)
+            return (
+                item.base_x + item.dx + w / 2,
+                item.base_y + item.dy + h / 2,
+                w,
+                h,
+            )
+
+        start = {item: model(item) for item in (first, second)}
+        union_cx = (
+            min(start[i][0] - start[i][2] / 2 for i in start)
+            + max(start[i][0] + start[i][2] / 2 for i in start)
+        ) / 2
+        union_cy = (
+            min(start[i][1] - start[i][3] / 2 for i in start)
+            + max(start[i][1] + start[i][3] / 2 for i in start)
+        ) / 2
+
+        dialog._begin_slider_undo()
+        for value in (400, 10, 250, 400):
+            dialog.scale_slider.setValue(value)
+        dialog._end_slider_undo()
+        for item in (first, second):
+            rendered = render_character(
+                item.sprite, 400, item.rotation, item.rotation_quality
+            )
+            item.apply_rendered(item.sprite, item._cache_key(), rendered)
+
+        for item in (first, second):
+            mx, my = model(item)[:2]
+            expected_cx = union_cx + (start[item][0] - union_cx) * 4
+            expected_cy = union_cy + (start[item][1] - union_cy) * 4
+            assert abs(mx - expected_cx) <= 1
+            assert abs(my - expected_cy) <= 1
+            assert item._pending_center is None
+    finally:
+        dialog._dirty = False
+        dialog.close()

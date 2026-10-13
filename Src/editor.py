@@ -775,6 +775,20 @@ class CharItem(QGraphicsPixmapItem):
         return super().itemChange(change, value)
 
 
+def _state_size(item, state):
+    scale = state[2] or CHAR_SCALE_DEFAULT
+    rotation = state[3]
+    if rotation % 90 == 0:
+        w, h = unrotated_render_size(item.sprite, scale, state[8], state[9])
+        return (h, w) if rotation % 180 else (w, h)
+    cached = item._pix_cache.get(item._cache_key())
+    if cached is not None and scale == item.scale_pct:
+        return cached.size
+    ratio = scale / (item.scale_pct or scale)
+    pixmap = item.pixmap()
+    return pixmap.width() * ratio, pixmap.height() * ratio
+
+
 class TransformBox:
 
     NAMES = ("nw", "n", "ne", "e", "se", "s", "sw", "w")
@@ -1779,7 +1793,9 @@ class ZoomEntry(QLineEdit):
         reference = max(
             metrics.horizontalAdvance("100"), metrics.horizontalAdvance(text)
         )
-        self.setMinimumWidth(reference + 20)
+        width = reference + 20
+        self.setMinimumWidth(width)
+        self.setMaximumWidth(width)
 
     def restore_zoom(self):
         self.setText(str(round(self._last * 100)))
@@ -1872,6 +1888,7 @@ class AdvancedEditorDialog(QDialog):
         self._sync_panel()
         self._initial_signature = self._capture_all()
 
+        self.setWindowFlag(Qt.WindowType.Window, True)
         self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         self.setWindowTitle("MetalSlugFontReborn - Advanced Editor (Beta)")
@@ -2175,53 +2192,59 @@ class AdvancedEditorDialog(QDialog):
         )
 
     HELP_TEXT = """\
-Mouse
-
-- Drag a character to move it. Guides snap it to other
-  characters' edges, centres and baselines; hold Alt or Ctrl
-  to suspend snapping.
-- Drag the corner squares of the selection box to resize and
-  the edge squares to stretch one axis. The opposite corner
-  stays put, Shift keeps the aspect ratio, and the ring just
-  outside a corner rotates (Shift snaps to 45 degree steps).
-  With several characters selected the box scales or stretches
-  the whole group.
-- Drag on empty space for a marquee: it selects everything it
-  touches and highlights characters while you drag. Shift adds,
-  Alt subtracts, a plain click on empty space clears, Escape
-  cancels. Ctrl+click adds single characters.
-- Wheel zooms, Shift + wheel scrolls sideways, middle-button
-  drag or Space pans. Double-click a character to replace it,
-  right-click for duplicate, resets, 90 degree rotations, draw
-  order and delete.
-
-Keys
-
-- Arrow keys nudge, Shift + Arrow nudges by 10.
-- Ctrl+A selects all, Escape clears the selection (and closes
-  the editor when nothing is selected), Delete removes, Ctrl+D
-  duplicates.
-- Ctrl+Z / Ctrl+Y undo and redo, Ctrl+S saves the image.
-- Ctrl+= / Ctrl+- zoom, Ctrl+0 fits the view, Ctrl+1 resets to
-  100%. You can also type a number into the zoom box and press
-  Enter.
-
-Panel
-
-- Color recolors the selection, Font color recolors every
-  character, Reset brings back their original colors.
-- The quick buttons act on the selection: Middle centers it on
-  the canvas, Reset restores how it looked when the editor
-  opened, Flip mirrors it, Duplicate copies it.
-- Opacity blends the selection over what is behind it, Hue
-  rotates its colors while keeping white and black readable.
-- Spacing & Alignment re-lays out the whole text; Canvas size
-  sets an exact image size and Crop to Content shrinks it
-  around the visible characters. Everything is undoable.
+<h3>Mouse</h3>
+<ul>
+<li><b>Move:</b> drag a character. Guides snap to other characters'
+edges, centres and baselines; hold Alt or Ctrl to suspend snapping.</li>
+<li><b>Resize &amp; stretch:</b> drag the selection box corner squares to
+resize and the edge squares to stretch one axis. The opposite corner
+stays put, Shift keeps the aspect ratio, and the ring just outside a
+corner rotates (Shift snaps to 45&deg; steps). With several characters
+selected the box scales or stretches the whole group.</li>
+<li><b>Marquee:</b> drag on empty space to select by area. Shift adds,
+Alt subtracts, a plain click on empty space clears, Escape cancels.
+Ctrl+click adds single characters.</li>
+<li><b>View:</b> the wheel zooms, Shift + wheel scrolls sideways,
+middle-button drag or Space pans. Double-click a character to replace
+it; right-click for duplicate, resets, 90&deg; rotations, draw order
+and delete.</li>
+</ul>
+<h3>Keys</h3>
+<ul>
+<li>Arrow keys nudge the selection, Shift + Arrow nudges by 10.</li>
+<li><b>Ctrl+A</b> select all, <b>Escape</b> clear the selection (and
+close the editor when nothing is selected), <b>Delete</b> remove,
+<b>Ctrl+D</b> duplicate.</li>
+<li><b>Ctrl+Z</b> / <b>Ctrl+Y</b> undo and redo, <b>Ctrl+S</b> save
+the image.</li>
+<li><b>Ctrl+=</b> / <b>Ctrl+-</b> zoom, <b>Ctrl+0</b> fit the view,
+<b>Ctrl+1</b> reset to 100%. You can also type a number into the zoom
+box and press Enter.</li>
+</ul>
+<h3>Panel</h3>
+<ul>
+<li><b>Color</b> recolors the selection, <b>Font color</b> recolors
+every character, <b>Reset</b> brings back their original colors.</li>
+<li>Quick buttons: <b>Middle</b> centers the selection on the canvas,
+<b>Reset</b> restores how it looked when the editor opened,
+<b>Flip</b> mirrors it, <b>Duplicate</b> copies it.</li>
+<li><b>Opacity</b> blends the selection over what is behind it,
+<b>Hue</b> rotates its colors while keeping white and black
+readable.</li>
+<li><b>Spacing &amp; Alignment</b> re-lays out the whole text,
+<b>Canvas size</b> sets an exact image size and <b>Crop to
+Content</b> shrinks it around the visible characters. Everything is
+undoable.</li>
+</ul>
 """
 
     def _show_help(self):
-        QMessageBox.information(self, "Advanced Editor Help", self.HELP_TEXT)
+        box = QMessageBox(self)
+        box.setWindowTitle("Advanced Editor Help")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(self.HELP_TEXT)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.exec()
 
     def _fit_view(self):
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
@@ -2970,35 +2993,60 @@ Panel
         else:
             self._sync_panel()
 
+    def _item_size(self, item):
+        cached = item._pix_cache.get(item._cache_key())
+        if cached is not None:
+            return cached.size, True
+        if item.rotation % 90 == 0:
+            w, h = unrotated_render_size(
+                item.sprite, item.scale_pct, item.stretch_x, item.stretch_y
+            )
+            if item.rotation % 180:
+                w, h = h, w
+            return (w, h), True
+        return (item.pixmap().width(), item.pixmap().height()), False
+
     def _scale_selection(self, items, value):
-        rects = {item: self.scene._item_scene_rect(item) for item in items}
-        union = rects[items[0]]
-        for rect in rects.values():
-            union = union.united(rect)
-        cx, cy = union.center().x(), union.center().y()
+        baseline = getattr(self, "_slider_undo_before", None) or {}
+        models = {}
         for item in items:
-            old_scale = item.scale_pct or CHAR_SCALE_DEFAULT
-            factor = value / old_scale
-            rect = rects[item]
-            new_cx = cx + (rect.center().x() - cx) * factor
-            new_cy = cy + (rect.center().y() - cy) * factor
-            item.scale_pct = value
-            cached = item._pix_cache.get(item._cache_key())
-            w = h = None
-            if cached is not None:
-                w, h = cached.size
-            elif item.rotation % 90 == 0:
-                w, h = unrotated_render_size(
-                    item.sprite, value, item.stretch_x, item.stretch_y
+            state = baseline.get(item)
+            if state is not None:
+                w, h = _state_size(item, state)
+                models[item] = (
+                    state[4] + state[0] + w / 2,
+                    state[5] + state[1] + h / 2,
+                    w,
+                    h,
+                    state[2] or CHAR_SCALE_DEFAULT,
                 )
-                if item.rotation % 180:
-                    w, h = h, w
-            if w is None:
-                w = rect.width() * factor
-                h = rect.height() * factor
-                item._pending_center = QPointF(new_cx, new_cy)
             else:
+                (w, h), _ = self._item_size(item)
+                models[item] = (
+                    item.base_x + item.dx + w / 2,
+                    item.base_y + item.dy + h / 2,
+                    w,
+                    h,
+                    item.scale_pct or CHAR_SCALE_DEFAULT,
+                )
+        min_x = min(m[0] - m[2] / 2 for m in models.values())
+        max_x = max(m[0] + m[2] / 2 for m in models.values())
+        min_y = min(m[1] - m[3] / 2 for m in models.values())
+        max_y = max(m[1] + m[3] / 2 for m in models.values())
+        cx, cy = (min_x + max_x) / 2, (min_y + max_y) / 2
+        for item in items:
+            mx, my, w0, h0, scale0 = models[item]
+            factor = value / scale0
+            new_cx = cx + (mx - cx) * factor
+            new_cy = cy + (my - cy) * factor
+            item.scale_pct = value
+            size, exact = self._item_size(item)
+            if exact:
+                w, h = size
                 item._pending_center = None
+            else:
+                w, h = w0 * factor, h0 * factor
+                item._pending_center = QPointF(new_cx, new_cy)
             item.dx = round(new_cx - w / 2 - item.base_x)
             item.dy = round(new_cy - h / 2 - item.base_y)
             item.request_render()
