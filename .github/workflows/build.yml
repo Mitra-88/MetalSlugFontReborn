@@ -33,7 +33,7 @@ jobs:
           echo "$env:USERPROFILE\.local\bin" >> $env:GITHUB_PATH
 
       - name: Install Python
-        run: uv python install 3.14.8
+        run: uv python install 3.15
 
       - name: Restore uv cache
         uses: actions/cache@v6
@@ -100,7 +100,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install Python
-        run: uv python install 3.14.8
+        run: uv python install 3.15
 
       - name: Restore uv cache
         uses: actions/cache@v6
@@ -166,7 +166,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install Python
-        run: uv python install 3.14.8
+        run: uv python install 3.15
 
       - name: Restore uv cache
         uses: actions/cache@v6
@@ -233,10 +233,10 @@ jobs:
           echo "$env:USERPROFILE\.local\bin" >> $env:GITHUB_PATH
 
       - name: Install Python
-        run: uv python install 3.14.8
+        run: uv python install 3.15
 
       - name: Create virtual environment
-        run: uv venv --python 3.14.8
+        run: uv venv --python 3.15
 
       - name: Restore uv cache
         uses: actions/cache@v6

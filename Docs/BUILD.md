@@ -16,11 +16,11 @@
 You should be able to compile MetalSlugFontReborn successfully on the following
 platforms:
 
-| Operating System | Supported Versions                             | Architecture |
-|------------------|------------------------------------------------|--------------|
-| Windows          | 11, 10 (1809 or later)                         | 64-Bit       |
-| GNU/Linux        | Debian 13, Ubuntu 26.04, Fedora 44, Arch Linux | 64-Bit       |
-| macOS            | 13 (Ventura) and later                         | ARM64        |
+| Operating System | Supported Versions                                 | Architecture | Tested |
+|------------------|----------------------------------------------------|--------------|--------|
+| Windows          | 11, 10 (1809 or higher)                            | 64-Bit       |   ✅   |
+| GNU/Linux        | Debian 13, Ubuntu 22.04, Fedora 44, Arch Linux     | 64-Bit       |   ✅   |
+| macOS            | 14.4 (Ventura) and higher                          | ARM64        |   ❌   |
 
 # Get the source code
 
@@ -40,7 +40,7 @@ git pull
 To compile MetalSlugFontReborn you will need the following:
 
 - [Python](https://www.python.org/) 3.12 or later
-- [Rust](https://www.rust-lang.org/tools/install) 1.85 or later (the crate uses the 2024 edition), for the native rotation library. Without it the build still works and rotation falls back to a slower pure-Python engine.
+- [Rust](https://www.rust-lang.org/tools/install) 1.99 or later (the crate uses the 2024 edition), for the native rotation library. Without it the build still works and rotation falls back to a slower pure-Python engine.
 - [PyInstaller](https://pyinstaller.org/en/stable/) 6.22.2 or later
 - [PySide6-Essentials](https://pypi.org/project/PySide6/) 6.11.2 or later
 - [Pillow](https://pillow.readthedocs.io/en/stable/) 12.3.0 or later
@@ -54,7 +54,7 @@ Open Powershell and run:
 
 ```sh
 cd MetalSlugFontReborn
-uv python install 3.14.8
+uv python install 3.15
 uv sync --frozen
 git rev-parse --short HEAD > Src\build_commit.txt
 cargo build --release --manifest-path rust\rotsprite-rs\Cargo.toml
@@ -92,7 +92,7 @@ Open the terminal and run:
 
 ```sh
 cd MetalSlugFontReborn
-uv python install 3.14.8
+uv python install 3.15
 uv sync --frozen
 git rev-parse --short HEAD > Src/build_commit.txt
 cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
