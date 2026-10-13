@@ -5,7 +5,7 @@ This document provides an overview of the latest updates, milestones, and upcomi
 ## Current Status
 
 - **Stable Version**: 3.2.0
-- **Release Date**: 2026-06-29
+- **Release Date**: 2026-10-13
 - **Maintainer**: Mitra-88
 
 ## Achieved Milestones
@@ -45,3 +45,8 @@ This document provides an overview of the latest updates, milestones, and upcomi
 - **Milestone 9: Advanced Mode**
   - **Date Achieved**: 2026-09-08
   - **Description**: Introduced a beta Advanced Mode, a per-character sprite editor allowing drag, scale, rotation, replacement and deletion of individual characters, multi-select group operations, spacing and alignment controls, object snapping with guide lines, undo/redo, and canvas zoom/pan.
+
+## Planned Milestones
+
+- **Milestone 10: Sprite Spacing Corrections** (pending)
+  - **Description**: Correct the spacing of some sprites.
