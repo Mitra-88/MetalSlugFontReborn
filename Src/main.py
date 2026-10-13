@@ -637,6 +637,9 @@ class MainWindow(QMainWindow):
         self.font_select.currentIndexChanged.connect(self.schedule_preview_update)
         self.font_select.currentIndexChanged.connect(self._on_font_changed)
         self.color_select.currentTextChanged.connect(self.schedule_preview_update)
+        self.color_select.currentTextChanged.connect(
+            lambda _color: self._update_window_title()
+        )
         self.schedule_preview_update()
 
         for first, second in (
@@ -934,6 +937,7 @@ class MainWindow(QMainWindow):
         font_id = int(self.font_select.currentText())
         self.highlighter.set_font_id(font_id)
         self._update_unsupported_hint(self.text_input.toPlainText())
+        self._update_window_title()
 
     def _on_zoom_changed(self, value):
         self._preview_user_zoomed = True
@@ -998,7 +1002,11 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"MetalSlugFontReborn - {self._title_status}")
             return
         char_count = len(self.text_input.toPlainText().strip())
-        self.setWindowTitle(f"MetalSlugFontReborn - {char_count} characters")
+        font = self.font_select.currentText()
+        color = self.color_select.currentText()
+        self.setWindowTitle(
+            f"MetalSlugFontReborn - Font {font} {color} - {char_count} characters"
+        )
 
     def schedule_preview_update(self):
         self.preview_pulse.stop()

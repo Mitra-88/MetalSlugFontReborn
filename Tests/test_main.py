@@ -396,3 +396,23 @@ def test_main_window_and_app_carry_the_icon(qapp, tmp_path, monkeypatch):
         assert not window.windowIcon().isNull()
     finally:
         window.close()
+
+
+def test_window_title_shows_font_and_color(qapp, monkeypatch, tmp_path):
+    import ui_common
+    from ui_common import Config
+
+    monkeypatch.setattr("main.load_config", lambda *args, **kwargs: True)
+    monkeypatch.setattr(ui_common, "config", Config(tmp_path / "config.toml"))
+    monkeypatch.setattr("main.ImageWorker.process", lambda self, params: None)
+    window = MainWindow()
+    try:
+        window.text_input.setPlainText("HI")
+        assert "Font 1 Blue" in window.windowTitle()
+        window.color_select.setCurrentText("Orange")
+        assert "Font 1 Orange" in window.windowTitle()
+        window.font_select.setCurrentText("2")
+        assert "Font 2" in window.windowTitle()
+        assert "2 characters" in window.windowTitle()
+    finally:
+        window.close()
