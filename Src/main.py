@@ -958,7 +958,7 @@ class MainWindow(QMainWindow):
 
     def _apply_zoom_to_preview(self):
         if self._last_preview is not None:
-            self._display_preview_image(*self._last_preview)
+            self._display_preview_image(self._last_preview)
         else:
             self.preview_timer.start()
 
@@ -977,7 +977,7 @@ class MainWindow(QMainWindow):
     def fit_preview(self):
         self._preview_user_zoomed = False
         if self._last_preview is not None:
-            self._display_preview_image(*self._last_preview)
+            self._display_preview_image(self._last_preview)
         else:
             self.schedule_preview_update()
 
@@ -1029,8 +1029,9 @@ class MainWindow(QMainWindow):
         self.dimensions_label.setText("Resolution: -")
         self._settle_preview_pulse()
 
-    def _display_preview_image(self, pil_image, scale):
-        self._last_preview = (pil_image, scale)
+    def _display_preview_image(self, pil_image):
+        self._last_preview = pil_image
+        scale = self.scale_select.currentIndex() + 1
 
         out_w = pil_image.width * scale
         out_h = pil_image.height * scale
@@ -1121,8 +1122,7 @@ class MainWindow(QMainWindow):
         if self._closed:
             return
         if not self._flush_preview_queue():
-            scale = self.scale_select.currentIndex() + 1
-            self._display_preview_image(image, scale)
+            self._display_preview_image(image)
 
     @Slot(str, bool)
     def _on_preview_failed(self, message, reveal_supported_button):

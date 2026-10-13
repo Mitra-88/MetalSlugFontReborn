@@ -416,3 +416,30 @@ def test_window_title_shows_font_and_color(qapp, monkeypatch, tmp_path):
         assert "2 characters" in window.windowTitle()
     finally:
         window.close()
+
+
+def test_output_size_updates_preview_immediately(qapp, monkeypatch, tmp_path):
+    from PIL import Image as PILImage
+
+    import ui_common
+    from ui_common import Config
+
+    monkeypatch.setattr("main.load_config", lambda *args, **kwargs: True)
+    monkeypatch.setattr(ui_common, "config", Config(tmp_path / "config.toml"))
+    monkeypatch.setattr("main.ImageWorker.process", lambda self, params: None)
+    monkeypatch.setattr(
+        "main.ImageWorker.process_preview", lambda self, params: None
+    )
+    window = MainWindow()
+    try:
+        window.text_input.setPlainText("HI")
+        window._display_preview_image(PILImage.new("RGBA", (56, 32)))
+        assert "56 x 32" in window.dimensions_label.text()
+        before = window.preview_label.size().width()
+        window.scale_select.setCurrentIndex(3)
+        assert "224 x 128" in window.dimensions_label.text()
+        assert window.preview_label.size().width() > before
+        window.scale_select.setCurrentIndex(0)
+        assert "56 x 32" in window.dimensions_label.text()
+    finally:
+        window.close()
