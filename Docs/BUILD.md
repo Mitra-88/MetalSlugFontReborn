@@ -30,6 +30,7 @@ Or you can clone the repository using the following command:
 ```sh
 git clone https://github.com/Mitra-88/MetalSlugFontReborn.git
 ```
+Note: cloning gives you the development branch, which may be broken or unstable. For everyday use, prefer a stable release from the [releases page](https://github.com/Mitra-88/MetalSlugFontReborn/releases/latest).
 To update an existing clone you can use the following commands:
 ```sh
 cd MetalSlugFontReborn

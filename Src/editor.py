@@ -7,7 +7,7 @@ from math import atan2, ceil, cos, degrees, floor, radians, sin
 from pathlib import Path
 from time import time
 
-from PIL import Image, ImageChops, ImageQt
+from PIL import Image, ImageChops, ImageEnhance, ImageQt
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
@@ -90,6 +90,9 @@ CHAR_SCALE_DEFAULT = 100
 HUE_NEUTRAL_SATURATION = 0.08
 HUE_MIN = -180
 HUE_MAX = 180
+APPEARANCE_MIN = 0
+APPEARANCE_MAX = 300
+APPEARANCE_DEFAULT = 100
 OPACITY_MIN = 0
 OPACITY_MAX = 100
 OPACITY_DEFAULT = 100
@@ -381,6 +384,25 @@ ALIGNMENTS = ["Left", "Center", "Right"]
 UNDO_MAX_STEPS = 30
 
 
+def apply_adjustments(image, brightness=1.0, saturation=1.0, contrast=1.0):
+    if brightness == 1.0 and saturation == 1.0 and contrast == 1.0:
+        return image
+
+    def tone_lut(i):
+        value = i * brightness
+        return (value / 255 - 0.5) * contrast * 255 + 127.5
+
+    red, green, blue, alpha = image.split()
+    lut = [min(255, max(0, round(tone_lut(i)))) for i in range(256)]
+    red = red.point(lut)
+    green = green.point(lut)
+    blue = blue.point(lut)
+    merged = Image.merge("RGBA", (red, green, blue, alpha))
+    if saturation != 1.0:
+        merged = ImageEnhance.Color(merged).enhance(saturation)
+    return merged
+
+
 def shift_sprite_hue(sprite, degrees):
     if not degrees % 360:
         return sprite
@@ -458,6 +480,17 @@ def render_job(sprite, key, quality):
     try:
         if key[7] % 360:
             sprite = shift_sprite_hue(sprite, key[7])
+        if (key[8], key[9], key[10]) != (
+            APPEARANCE_DEFAULT,
+            APPEARANCE_DEFAULT,
+            APPEARANCE_DEFAULT,
+        ):
+            sprite = apply_adjustments(
+                sprite,
+                brightness=key[9] / 100,
+                saturation=key[8] / 100,
+                contrast=key[10] / 100,
+            )
         return render_character(
             sprite,
             key[0],
@@ -550,6 +583,9 @@ class CharItem(QGraphicsPixmapItem):
         self.flip_v = False
         self.opacity = OPACITY_DEFAULT
         self.hue_shift = 0
+        self.saturation = APPEARANCE_DEFAULT
+        self.brightness = APPEARANCE_DEFAULT
+        self.contrast = APPEARANCE_DEFAULT
         self._pix_cache = {}
         self._hue_cache = {}
         self._pending_center = None
@@ -577,6 +613,9 @@ class CharItem(QGraphicsPixmapItem):
             self.hue_shift,
             self.zValue(),
             self.color_variant,
+            self.saturation,
+            self.brightness,
+            self.contrast,
         )
 
     def apply_state(self, state):
@@ -601,6 +640,9 @@ class CharItem(QGraphicsPixmapItem):
             self.hue_shift,
             z_value,
             color_variant,
+            self.saturation,
+            self.brightness,
+            self.contrast,
         ) = state
         if char != self.char or color_variant != self.color_variant:
             self.color_variant = color_variant
@@ -617,16 +659,44 @@ class CharItem(QGraphicsPixmapItem):
         self._pix_cache.clear()
         self._hue_cache.clear()
 
+    def _appearance_neutral(self):
+        return (
+            not self.hue_shift % 360
+            and (self.saturation, self.brightness, self.contrast)
+            == (
+                APPEARANCE_DEFAULT,
+                APPEARANCE_DEFAULT,
+                APPEARANCE_DEFAULT,
+            )
+        )
+
     def tinted_sprite(self, compute=False):
-        if not self.hue_shift % 360:
+        if self._appearance_neutral():
             return self.sprite
-        cached = self._hue_cache.get(self.hue_shift)
+        key = self._appearance_key()
+        cached = self._hue_cache.get(key)
         if cached is None and compute:
-            cached = shift_sprite_hue(self.sprite, self.hue_shift)
+            sprite = self.sprite
+            if self.hue_shift % 360:
+                sprite = shift_sprite_hue(sprite, self.hue_shift)
+            cached = apply_adjustments(
+                sprite,
+                brightness=self.brightness / 100,
+                saturation=self.saturation / 100,
+                contrast=self.contrast / 100,
+            )
             if len(self._hue_cache) >= 8:
                 self._hue_cache.clear()
-            self._hue_cache[self.hue_shift] = cached
+            self._hue_cache[key] = cached
         return cached if cached is not None else self.sprite
+
+    def _appearance_key(self):
+        return (
+            self.hue_shift,
+            self.saturation,
+            self.brightness,
+            self.contrast,
+        )
 
     def _cache_key(self):
         return (
@@ -638,6 +708,9 @@ class CharItem(QGraphicsPixmapItem):
             self.flip_v,
             self.opacity,
             self.hue_shift,
+            self.saturation,
+            self.brightness,
+            self.contrast,
         )
 
     def prune_cache(self):
@@ -651,10 +724,12 @@ class CharItem(QGraphicsPixmapItem):
         key = self._cache_key()
         rendered = self._pix_cache.get(key)
         if rendered is None:
-            hue_pending = bool(self.hue_shift % 360) and (
-                self.hue_shift not in self._hue_cache
+            appearance_pending = not self._appearance_neutral() and (
+                self._appearance_key() not in self._hue_cache
             )
-            if self._dispatcher is not None and (self.rotation % 90 or hue_pending):
+            if self._dispatcher is not None and (
+                self.rotation % 90 or appearance_pending
+            ):
                 self.setPixmap(
                     QPixmap.fromImage(
                         ImageQt.ImageQt(
@@ -2131,18 +2206,19 @@ class AdvancedEditorDialog(QDialog):
             self.status_dirty_label,
         ):
             layout.addWidget(label)
-        layout.addStretch()
+        corner_row = QHBoxLayout()
+        corner_row.setSpacing(10)
+        corner_row.addStretch()
         self.status_canvas_label = QLabel()
-        layout.addWidget(self.status_canvas_label)
+        corner_row.addWidget(self.status_canvas_label)
         self.zoom_entry = ZoomEntry()
         self.zoom_entry.zoom_committed.connect(self.view.zoom_to)
-        zoom_row = QHBoxLayout()
-        zoom_row.setSpacing(2)
-        zoom_row.addWidget(self.zoom_entry)
+        corner_row.addWidget(self.zoom_entry)
+        corner_row.addSpacing(2)
         self.zoom_suffix_label = QLabel("%")
         self.zoom_suffix_label.setObjectName("ZoomSuffix")
-        zoom_row.addWidget(self.zoom_suffix_label)
-        layout.addLayout(zoom_row)
+        corner_row.addWidget(self.zoom_suffix_label)
+        layout.addLayout(corner_row, 1)
         self._update_status_counts()
         return bar
 
@@ -2232,7 +2308,8 @@ every character, <b>Reset</b> brings back their original colors.</li>
 <b>Flip</b> mirrors it, <b>Duplicate</b> copies it.</li>
 <li><b>Opacity</b> blends the selection over what is behind it,
 <b>Hue</b> rotates its colors while keeping white and black
-readable.</li>
+readable, and <b>Brightness</b>, <b>Saturation</b> and
+<b>Contrast</b> tune the colors from 0 to 300%.</li>
 <li><b>Spacing &amp; Alignment</b> re-lays out the whole text,
 <b>Canvas size</b> sets an exact image size and <b>Crop to
 Content</b> shrinks it around the visible characters. Everything is
@@ -2482,6 +2559,52 @@ undoable.</li>
         hue_row.addWidget(self.hue_spin)
         form.addRow("Hue shift:", hue_row)
 
+        for name, attr, tip in (
+            (
+                "Brightness",
+                "brightness",
+                ("Multiply the color brightness of the selected "
+                 "character(s) (0 to 300%)."),
+            ),
+            (
+                "Saturation",
+                "saturation",
+                ("Adjust the color intensity of the selected "
+                 "character(s) (0 to 300%)."),
+            ),
+            (
+                "Contrast",
+                "contrast",
+                ("Adjust the contrast of the selected character(s) "
+                 "(0 to 300%)."),
+            ),
+        ):
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(APPEARANCE_MIN, APPEARANCE_MAX)
+            slider.setValue(APPEARANCE_DEFAULT)
+            slider.setTickPosition(QSlider.TicksBelow)
+            slider.setTickInterval(50)
+            slider.setToolTip(tip)
+            spin = QSpinBox()
+            spin.setRange(APPEARANCE_MIN, APPEARANCE_MAX)
+            spin.setSuffix("%")
+            slider.valueChanged.connect(
+                lambda value, attr=attr: self._on_appearance_slider_changed(
+                    attr, value
+                )
+            )
+            spin.valueChanged.connect(
+                lambda value, attr=attr: self._on_appearance_spin_changed(attr, value)
+            )
+            slider.sliderPressed.connect(self._begin_slider_undo)
+            slider.sliderReleased.connect(self._end_slider_undo)
+            setattr(self, f"{attr}_slider", slider)
+            setattr(self, f"{attr}_spin", spin)
+            row = QHBoxLayout()
+            row.addWidget(slider, 1)
+            row.addWidget(spin)
+            form.addRow(f"{name}:", row)
+
         form.addRow(self._build_selection_actions_row())
 
         return group
@@ -2602,6 +2725,9 @@ undoable.</li>
         self.canvas_h_spin.setRange(1, 10000)
         self.canvas_h_spin.setValue(canvas_h)
         self.canvas_h_spin.setToolTip("Image height in pixels.")
+        for spin in (self.canvas_w_spin, self.canvas_h_spin):
+            spin.setKeyboardTracking(False)
+            spin.valueChanged.connect(lambda _value: self._apply_canvas_size())
         apply_canvas_btn = QPushButton("Apply")
         apply_canvas_btn.setToolTip("Resize the image to the given size.")
         apply_canvas_btn.clicked.connect(self._apply_canvas_size)
@@ -2911,6 +3037,12 @@ undoable.</li>
             self.opacity_spin,
             self.hue_slider,
             self.hue_spin,
+            self.brightness_slider,
+            self.brightness_spin,
+            self.saturation_slider,
+            self.saturation_spin,
+            self.contrast_slider,
+            self.contrast_spin,
             self.item_color_combo,
         ):
             widget.blockSignals(True)
@@ -2932,6 +3064,12 @@ undoable.</li>
                 self.opacity_spin.setValue(first.opacity)
                 self.hue_slider.setValue(first.hue_shift)
                 self.hue_spin.setValue(first.hue_shift)
+                self.brightness_slider.setValue(first.brightness)
+                self.brightness_spin.setValue(first.brightness)
+                self.saturation_slider.setValue(first.saturation)
+                self.saturation_spin.setValue(first.saturation)
+                self.contrast_slider.setValue(first.contrast)
+                self.contrast_spin.setValue(first.contrast)
         finally:
             for widget in (
                 self.offset_x_spin,
@@ -2946,6 +3084,12 @@ undoable.</li>
                 self.opacity_spin,
                 self.hue_slider,
                 self.hue_spin,
+                self.brightness_slider,
+                self.brightness_spin,
+                self.saturation_slider,
+                self.saturation_spin,
+                self.contrast_slider,
+                self.contrast_spin,
                 self.item_color_combo,
             ):
                 widget.blockSignals(False)
@@ -2964,6 +3108,12 @@ undoable.</li>
             self.opacity_spin,
             self.hue_slider,
             self.hue_spin,
+            self.brightness_slider,
+            self.brightness_spin,
+            self.saturation_slider,
+            self.saturation_spin,
+            self.contrast_slider,
+            self.contrast_spin,
             self.item_color_combo,
             self.rotation_quality,
         ):
@@ -3114,6 +3264,23 @@ undoable.</li>
         self.hue_slider.setValue(value)
         self.hue_slider.blockSignals(False)
         self._apply_char_property("hue_shift", value)
+
+    def _on_appearance_slider_changed(self, attr, value):
+        spin = getattr(self, f"{attr}_spin")
+        for widget in (getattr(self, f"{attr}_slider"), spin):
+            widget.blockSignals(True)
+            widget.setValue(value)
+            widget.blockSignals(False)
+        self._apply_char_property(
+            attr, value, push=not self._in_slider_gesture()
+        )
+
+    def _on_appearance_spin_changed(self, attr, value):
+        slider = getattr(self, f"{attr}_slider")
+        slider.blockSignals(True)
+        slider.setValue(value)
+        slider.blockSignals(False)
+        self._apply_char_property(attr, value)
 
     def _set_spin_clamped(self, spin, value):
         spin.setValue(max(spin.minimum(), min(spin.maximum(), value)))

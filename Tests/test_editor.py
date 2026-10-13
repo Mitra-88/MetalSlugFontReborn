@@ -145,7 +145,7 @@ def test_slider_release_prunes_item_cache(qapp, tmp_path):
         assert item.scale_pct == 250
         dialog._end_slider_undo()
         assert list(item._pix_cache.keys()) == [
-            (250, 0, 100, 100, False, False, 100, 0)
+            (250, 0, 100, 100, False, False, 100, 0, 100, 100, 100)
         ]
     finally:
         dialog._dirty = False
@@ -192,7 +192,7 @@ def test_scale_slider_seeds_pix_cache(qapp, tmp_path):
     dialog._end_slider_undo()
     assert item.scale_pct == 180
     assert list(item._pix_cache.keys()) == [
-        (180, 0, 100, 100, False, False, 100, 0)
+        (180, 0, 100, 100, False, False, 100, 0, 100, 100, 100)
     ]
     dialog._dirty = False
     dialog.close()
@@ -1058,7 +1058,7 @@ def test_cache_key_includes_opacity_and_hue(qapp, tmp_path):
     try:
         item = dialog.items[0]
         key = item._cache_key()
-        assert len(key) == 8
+        assert len(key) == 11
         assert key[6] == 100 and key[7] == 0
         item.opacity = 50
         item.hue_shift = 90
@@ -1725,9 +1725,11 @@ def test_canvas_size_apply_and_crop_to_content(qapp, tmp_path):
         assert tuple(dialog.canvas_size) == (canvas_w, canvas_h)
         assert item.dx == 60 and item.dy == 40
         dialog.canvas_w_spin.setValue(canvas_w + 50)
+        assert tuple(dialog.canvas_size) == (canvas_w + 50, canvas_h)
         dialog.canvas_h_spin.setValue(canvas_h + 25)
-        dialog._apply_canvas_size()
         assert tuple(dialog.canvas_size) == (canvas_w + 50, canvas_h + 25)
+        dialog._undo()
+        assert tuple(dialog.canvas_size) == (canvas_w + 50, canvas_h)
         dialog._undo()
         assert tuple(dialog.canvas_size) == (canvas_w, canvas_h)
     finally:
@@ -2061,6 +2063,90 @@ def test_enter_key_does_not_close_the_editor(qapp, tmp_path):
         QTest.keyClick(dialog, Qt.Key_Enter)
         qapp.processEvents()
         assert dialog.isVisible()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_appearance_sliders_render_on_worker(qapp, tmp_path):
+    from editor import render_character, render_job
+
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        dispatcher = _RecordingDispatcher()
+        item._dispatcher = dispatcher
+        dialog._on_appearance_slider_changed("contrast", 200)
+        assert len(dispatcher.requests) == 1
+        requested_key = dispatcher.requests[0][1]
+        assert requested_key[10] == 200
+        assert requested_key[8] == 100 and requested_key[9] == 100
+        rendered = render_job(item.sprite, requested_key, item.rotation_quality)
+        item.apply_rendered(item.sprite, requested_key, rendered)
+        assert not item.pixmap().isNull()
+        neutral = render_character(item.sprite, 100, 0)
+        assert rendered.tobytes() != neutral.tobytes()
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_render_job_appearance_is_neutral_when_defaults(qapp, tmp_path):
+    from editor import render_character, render_job
+
+    dialog = make_dialog(tmp_path)
+    item = dialog.items[0]
+    key = (100, 0, 100, 100, False, False, 100, 0, 100, 100, 100)
+    assert (
+        render_job(item.sprite, key, item.rotation_quality).tobytes()
+        == render_character(item.sprite, 100, 0).tobytes()
+    )
+    dialog._dirty = False
+    dialog.close()
+
+
+def test_desaturation_changes_rendered_pixels(qapp, tmp_path):
+    from editor import render_character, render_job
+
+    dialog = make_dialog(tmp_path)
+    item = dialog.items[0]
+    colored = item.sprite.convert("RGBA")
+    gray_key = (100, 0, 100, 100, False, False, 100, 0, 0, 100, 100)
+    gray = render_job(colored, gray_key, item.rotation_quality)
+    normal = render_character(colored, 100, 0)
+    assert gray.tobytes() != normal.tobytes()
+    dialog._dirty = False
+    dialog.close()
+
+
+def test_appearance_changes_undo(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        dialog._on_appearance_spin_changed("brightness", 150)
+        assert item.brightness == 150
+        dialog._undo()
+        assert item.brightness == 100
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_zoom_and_canvas_indicators_hug_bottom_right(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        dialog.resize(1280, 800)
+        dialog.show()
+        qapp.processEvents()
+        corner = dialog.zoom_suffix_label.mapTo(dialog, QPointF(1, 1))
+        assert corner.x() >= dialog.width() - 20
+        assert corner.y() >= dialog.height() - 30
+        entry_left = dialog.zoom_entry.mapTo(dialog, QPointF(0, 0)).x()
+        label = dialog.status_canvas_label
+        canvas_right = label.mapTo(dialog, QPointF(label.width(), 0)).x()
+        assert 0 < entry_left - canvas_right <= 15
     finally:
         dialog._dirty = False
         dialog.close()
