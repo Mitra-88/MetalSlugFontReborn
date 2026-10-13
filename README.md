@@ -85,11 +85,11 @@ MetalSlugFontReborn is a free, open-source desktop app built with PySide6 and Pi
 
 #### Operating Systems
 
-| Operating System | Supported Versions                             | Architecture | Tested |
-|------------------|------------------------------------------------|--------------|--------|
-| Windows          | 11, 10 (1809 or later)                         | 64-Bit       |   ✅   |
-| GNU/Linux        | Debian 13, Ubuntu 26.04, Fedora 44, Arch Linux | 64-Bit       |   ✅   |
-| macOS            | 13 (Ventura) and later                         | ARM64        |   ❌   |
+| Operating System | Supported Versions                                 | Architecture | Tested |
+|------------------|----------------------------------------------------|--------------|--------|
+| Windows          | 11, 10 (1809 or higher)                            | 64-Bit       |   ✅   |
+| GNU/Linux        | Debian 13, Ubuntu 22.04, Fedora 44, Arch Linux     | 64-Bit       |   ✅   |
+| macOS            | 14.4 (Ventura) and higher                          | ARM64        |   ❌   |
 
 > **macOS:** Built for Apple Silicon. I don't own a Mac to verify, but it should work.
 
