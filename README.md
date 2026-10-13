@@ -75,7 +75,7 @@ MetalSlugFontReborn is a free, open-source desktop app built with PySide6 and Pi
 - **Multiple Font Styles** - Choose from 5 Metal Slug font variations
 - **Rich Color Palette** - Blue, Orange, Gold, and Yellow variants
 - **Real-time Preview** - See your text rendered instantly as you type
-- **Advanced Mode (Beta)** - Optional per-character editor: drag, scale, rotate, replace each character, with undo/redo (see [examples](Docs/EXAMPLES.md#advanced-mode))
+- **Advanced Mode** - Optional per-character editor: drag, scale, stretch, rotate, recolor and replace each character, with snapping, multi-select and undo/redo (see [examples](Docs/EXAMPLES.md#advanced-mode))
 - **Theme Support** - Light, Dark, and Tokyo Night themes
 - **Cross-platform** - Works natively on Windows, macOS, and Linux.
 - **On-the-Fly Compression** - Adjustable PNG compression levels (0-9) to balance file size.

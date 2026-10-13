@@ -1968,7 +1968,7 @@ class AdvancedEditorDialog(QDialog):
         self.setWindowFlag(Qt.WindowType.Window, True)
         self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
-        self.setWindowTitle("MetalSlugFontReborn - Advanced Editor (Beta)")
+        self.setWindowTitle("MetalSlugFontReborn - Advanced Editor")
         self.setWindowIcon(
             QIcon(str(PROJECT_ROOT / "Assets" / "Icons" / "Raubtier.ico"))
         )
