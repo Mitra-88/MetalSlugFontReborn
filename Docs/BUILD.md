@@ -40,8 +40,20 @@ git pull
 
 To compile MetalSlugFontReborn you will need the following:
 
-- [Python](https://www.python.org/) 3.15 or later
+- [uv](https://docs.astral.sh/uv/) to manage the Python interpreter and the Python dependencies. Install it with:
+```sh
+# macOS and Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+```sh
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
 - [Rust](https://www.rust-lang.org/tools/install) 1.99 or later (the crate uses the 2024 edition), for the native rotation library. Without it the build still works and rotation falls back to a slower pure-Python engine.
+
+The remaining requirements are installed by `uv sync` from `pyproject.toml` and `uv.lock`, so you do not need to install them by hand:
+
+- [Python](https://www.python.org/) 3.15 or later
 - [PyInstaller](https://pyinstaller.org/en/stable/) 6.22.2 or later
 - [PySide6-Essentials](https://pypi.org/project/PySide6/) 6.12.0 or later
 - [Pillow](https://pillow.readthedocs.io/en/stable/) 12.3.0 or later
@@ -61,7 +73,7 @@ git rev-parse --short HEAD > Src\build_commit.txt
 cargo build --release --manifest-path rust\rotsprite-rs\Cargo.toml
 ```
 ```sh
-pyinstaller --noconfirm --onedir --windowed --icon "Assets/Icons/Raubtier.ico" --name "MetalSlugFontReborn" --clean --optimize "2" --version-file "versionfile.txt" --add-data "Src/build_commit.txt;." --add-data "LICENSE;." --add-data "Assets;Assets/" --add-binary "rust/rotsprite-rs/target/release/msfr_rotsprite.dll;."  "Src/main.py"
+uv run pyinstaller --noconfirm --onedir --windowed --icon "Assets/Icons/Raubtier.ico" --name "MetalSlugFontReborn" --clean --optimize "2" --version-file "versionfile.txt" --add-data "Src/build_commit.txt;." --add-data "LICENSE;." --add-data "Assets;Assets/" --add-binary "rust/rotsprite-rs/target/release/msfr_rotsprite.dll;."  "Src/main.py"
 Move-Item -Path "dist\MetalSlugFontReborn\_internal\Assets" -Destination "dist\MetalSlugFontReborn"
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "dist\MetalSlugFontReborn\_internal\PySide6\translations", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\tls", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\networkinformation", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\generic", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\iconengines", "dist\MetalSlugFontReborn\_internal\setuptools"
 Remove-Item -Force -ErrorAction SilentlyContinue "dist\MetalSlugFontReborn\_internal\PySide6\opengl32sw.dll", "dist\MetalSlugFontReborn\_internal\PySide6\Qt6Network.dll", "dist\MetalSlugFontReborn\_internal\PySide6\Qt6Svg.dll", "dist\MetalSlugFontReborn\_internal\libcrypto-3-x64.dll", "dist\MetalSlugFontReborn\_internal\libssl-3-x64.dll"
@@ -73,18 +85,18 @@ Remove-Item -Force -ErrorAction SilentlyContinue "dist\MetalSlugFontReborn\_inte
 
 You will need the following dependencies on Ubuntu/Debian:
 ```sh
-sudo apt install -y python3 python3-pip python3-venv libxcb-cursor0
+sudo apt install -y python3 libxcb-cursor0
 ```
 `libxcb-cursor0` is also required at runtime by the packaged build, which
 uses the xcb backend on Linux so the window manager provides a title bar,
 resizing and a close button.
 On Fedora:
 ```sh
-sudo dnf install -y python3 python3-pip python3-virtualenv xcb-util-cursor
+sudo dnf install -y python3 xcb-util-cursor
 ```
 On Arch:
 ```sh
-sudo pacman -Syu --noconfirm python-pip python-virtualenv xcb-util-cursor
+sudo pacman -Syu --noconfirm xcb-util-cursor
 ```
 
 ## Linux and macOS details
@@ -99,7 +111,7 @@ git rev-parse --short HEAD > Src/build_commit.txt
 cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
 ```
 ```sh
-pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/build_commit.txt:." --add-data "LICENSE:." --add-data "Assets:Assets/" --add-binary "rust/rotsprite-rs/target/release/libmsfr_rotsprite.so:."  "Src/main.py"
+uv run pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/build_commit.txt:." --add-data "LICENSE:." --add-data "Assets:Assets/" --add-binary "rust/rotsprite-rs/target/release/libmsfr_rotsprite.so:."  "Src/main.py"
 mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
 rm -rf dist/MetalSlugFontReborn/_internal/PySide6/translations dist/MetalSlugFontReborn/_internal/PySide6/plugins/tls dist/MetalSlugFontReborn/_internal/PySide6/plugins/networkinformation dist/MetalSlugFontReborn/_internal/PySide6/plugins/generic dist/MetalSlugFontReborn/_internal/PySide6/plugins/iconengines dist/MetalSlugFontReborn/_internal/setuptools
 rm -f dist/MetalSlugFontReborn/_internal/PySide6/Qt6Network* dist/MetalSlugFontReborn/_internal/PySide6/Qt6Svg* dist/MetalSlugFontReborn/_internal/libcrypto* dist/MetalSlugFontReborn/_internal/libssl*
