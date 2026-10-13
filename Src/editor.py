@@ -13,6 +13,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QIcon,
+    QIntValidator,
     QKeySequence,
     QPainter,
     QPalette,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QGraphicsItem,
@@ -445,6 +447,13 @@ def render_character(
     return img
 
 
+def unrotated_render_size(sprite, scale_pct, stretch_x, stretch_y):
+    return (
+        max(1, int(sprite.width * scale_pct * stretch_x / 10000.0)),
+        max(1, int(sprite.height * scale_pct * stretch_y / 10000.0)),
+    )
+
+
 def render_job(sprite, key, quality):
     try:
         if key[7] % 360:
@@ -543,6 +552,7 @@ class CharItem(QGraphicsPixmapItem):
         self.hue_shift = 0
         self._pix_cache = {}
         self._hue_cache = {}
+        self._pending_center = None
         self.rotation_quality = QUALITY_FAST_ROTSPRITE
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
@@ -573,6 +583,7 @@ class CharItem(QGraphicsPixmapItem):
         scene = self.scene()
         if scene is not None:
             scene.invalidate_bounds()
+        self._pending_center = None
         (
             self.dx,
             self.dy,
@@ -683,6 +694,19 @@ class CharItem(QGraphicsPixmapItem):
         self.setPixmap(QPixmap.fromImage(qimage))
         self._after_pixmap_change()
 
+    def request_render(self):
+        key = self._cache_key()
+        rendered = self._pix_cache.get(key)
+        if rendered is not None:
+            self._pending_center = None
+            self.setPixmap(QPixmap.fromImage(ImageQt.ImageQt(rendered)))
+            self._after_pixmap_change()
+            return
+        if self._dispatcher is not None:
+            self._dispatcher.request(self, key)
+            return
+        self.update_pixmap()
+
     def apply_rendered(self, sprite, key, rendered):
         if sprite is not self.sprite:
             return
@@ -697,6 +721,11 @@ class CharItem(QGraphicsPixmapItem):
         if dialog is None or (
             dialog._drag_before is None and scene.transform_box._gesture is None
         ):
+            center = self._pending_center
+            if center is not None:
+                self._pending_center = None
+                self.dx = round(center.x() - rendered.width / 2 - self.base_x)
+                self.dy = round(center.y() - rendered.height / 2 - self.base_y)
             self._place()
             scene.transform_box.refresh()
 
@@ -1734,6 +1763,7 @@ class ZoomEntry(QLineEdit):
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.setToolTip("Zoom level: type a percentage and press Enter.")
         self.setAccessibleName("Zoom level")
+        self.setValidator(QIntValidator(1, round(ZOOM_SCALES[-1] * 100), self))
         self.editingFinished.connect(self._commit)
         self.textChanged.connect(self._sync_width)
         self._last = 1.0
@@ -1745,14 +1775,14 @@ class ZoomEntry(QLineEdit):
 
     def _sync_width(self):
         metrics = self.fontMetrics()
-        text = self.text() or "100%"
+        text = self.text() or "100"
         reference = max(
-            metrics.horizontalAdvance("100%"), metrics.horizontalAdvance(text)
+            metrics.horizontalAdvance("100"), metrics.horizontalAdvance(text)
         )
         self.setMinimumWidth(reference + 20)
 
     def restore_zoom(self):
-        self.setText(f"{round(self._last * 100)}%")
+        self.setText(str(round(self._last * 100)))
         self.setModified(False)
         self._sync_width()
 
@@ -1760,21 +1790,21 @@ class ZoomEntry(QLineEdit):
         self._last = scale
         if self.hasFocus() and self.isModified():
             return
-        self.setText(f"{round(scale * 100)}%")
+        self.setText(str(round(scale * 100)))
         self.setModified(False)
         self._sync_width()
 
     def _commit(self):
-        text = self.text().strip().rstrip("%").strip()
+        text = self.text().strip()
         try:
-            percent = float(text)
+            percent = int(text)
         except ValueError:
             self.restore_zoom()
             return
         scale = max(ZOOM_SCALES[0], min(ZOOM_SCALES[-1], percent / 100))
         nearest = min(ZOOM_SCALES, key=lambda entry: abs(entry - scale))
         self.zoom_committed.emit(nearest)
-        self.setText(f"{round(nearest * 100)}%")
+        self.setText(str(round(nearest * 100)))
         self.setModified(False)
         self._sync_width()
 
@@ -1892,12 +1922,17 @@ class AdvancedEditorDialog(QDialog):
 
     def _update_scene_rect(self):
         bounds = self.scene._background_bounds()
-        self.scene.setSceneRect(
+        rect = QRectF(
             bounds.left() - SCENE_PADDING,
             bounds.top() - SCENE_PADDING,
             bounds.width() + 2 * SCENE_PADDING,
             bounds.height() + 2 * SCENE_PADDING,
         )
+        old = self.scene.sceneRect()
+        if old == rect:
+            return
+        self.scene.setSceneRect(rect)
+        self.scene.update(old.united(rect))
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -2082,7 +2117,13 @@ class AdvancedEditorDialog(QDialog):
         layout.addWidget(self.status_canvas_label)
         self.zoom_entry = ZoomEntry()
         self.zoom_entry.zoom_committed.connect(self.view.zoom_to)
-        layout.addWidget(self.zoom_entry)
+        zoom_row = QHBoxLayout()
+        zoom_row.setSpacing(2)
+        zoom_row.addWidget(self.zoom_entry)
+        self.zoom_suffix_label = QLabel("%")
+        self.zoom_suffix_label.setObjectName("ZoomSuffix")
+        zoom_row.addWidget(self.zoom_suffix_label)
+        layout.addLayout(zoom_row)
         self._update_status_counts()
         return bar
 
@@ -2127,77 +2168,56 @@ class AdvancedEditorDialog(QDialog):
                 border-radius: 4px;
                 padding: 1px 6px;
             }}
+            QLabel#ZoomSuffix {{
+                color: {text.name()};
+            }}
             """
         )
 
     HELP_TEXT = """\
 Mouse
 
-- Select one character to show its transform box: drag the
-  corner squares to resize width and height independently, just
-  like Aseprite (the opposite corner stays put; hold Shift to
-  keep the aspect ratio while dragging), the edge squares to
-  stretch one axis, and the area just outside a corner to rotate
-  around the character's centre. Hold Shift while rotating to
-  snap to 45 degree steps.
-- Select several characters and the box wraps them all: the
-  corner squares scale the whole group and the edge squares
-  stretch it in one direction, each character keeping its
-  relative size and spacing.
-- Drag a character to move it. Snapping aligns it to other
-  characters' edges, centres, baselines and the grid (magenta
-  and orange guides appear while dragging).
-- Hold Alt or Ctrl while dragging or transforming to suspend
-  snapping.
-- Drag on empty space for an Aseprite-style marquee: the dashed
-  rectangle selects every character it touches, and characters
-  light up under the band while you drag so you can see the
-  selection before releasing. Hold Shift to add to the selection
-  and Alt to subtract from it. A plain click on empty space
-  clears the selection, Escape cancels a marquee in progress.
-- With a rotated character selected, the transform box tilts
-  with it: the corner squares resize and the edge squares
-  stretch along the character's own axes, with the opposite
-  corner or edge staying pinned, exactly like Aseprite.
-- Ctrl+click adds characters to the selection.
-- Double-click a character to replace it with another one.
-- Right-click a character to reset its scale/rotation or delete it.
-- Mouse wheel zooms through preset steps, Shift + wheel scrolls
-  sideways, middle-button drag or holding Space pans the view.
+- Drag a character to move it. Guides snap it to other
+  characters' edges, centres and baselines; hold Alt or Ctrl
+  to suspend snapping.
+- Drag the corner squares of the selection box to resize and
+  the edge squares to stretch one axis. The opposite corner
+  stays put, Shift keeps the aspect ratio, and the ring just
+  outside a corner rotates (Shift snaps to 45 degree steps).
+  With several characters selected the box scales or stretches
+  the whole group.
+- Drag on empty space for a marquee: it selects everything it
+  touches and highlights characters while you drag. Shift adds,
+  Alt subtracts, a plain click on empty space clears, Escape
+  cancels. Ctrl+click adds single characters.
+- Wheel zooms, Shift + wheel scrolls sideways, middle-button
+  drag or Space pans. Double-click a character to replace it,
+  right-click for duplicate, resets, 90 degree rotations, draw
+  order and delete.
 
 Keys
 
-- Arrow keys nudge the selection, Shift + Arrow nudges by 10.
-- Ctrl+A selects every visible character, Escape clears the
-  selection (or closes the editor when nothing is selected),
-  Delete removes the selected ones, Ctrl+D duplicates them.
+- Arrow keys nudge, Shift + Arrow nudges by 10.
+- Ctrl+A selects all, Escape clears the selection (and closes
+  the editor when nothing is selected), Delete removes, Ctrl+D
+  duplicates.
 - Ctrl+Z / Ctrl+Y undo and redo, Ctrl+S saves the image.
-- Ctrl+= / Ctrl+- zoom in and out through the preset steps,
-  Ctrl+0 fits the view, Ctrl+1 resets to 100%.
-- Type a percentage into the zoom box in the status bar and
-  press Enter to snap the zoom to the closest preset.
+- Ctrl+= / Ctrl+- zoom, Ctrl+0 fits the view, Ctrl+1 resets to
+  100%. You can also type a number into the zoom box and press
+  Enter.
 
-Panels
+Panel
 
-- Font color switches every character to another color
-  palette of the same font; the Color field in Character
-  Controls switches only the selected characters, and Reset
-  brings back their original colors.
-- Character Controls edits the current selection. The controls
-  stay disabled while nothing is selected. The quick buttons:
-  Middle moves the selection to the middle of the image, Reset
-  restores the selected characters to how they were when the
-  editor opened, Flip mirrors them, and Duplicate copies them.
-- Opacity blends the selected characters over what is behind
-  them; Hue shift rotates their colors around the wheel while
-  keeping white and black shades readable.
-- Spacing & Alignment re-lays out every visible character from
-  the original text (spacing, vertical align, line align).
-- Right-click a character for duplicate, per-property resets,
-  exact 90 degree rotations, draw order and delete.
-- Canvas size sets the image to an exact size; Crop to Content
-  shrinks it tightly around the visible characters, cutting
-  empty margins. Both are undoable.
+- Color recolors the selection, Font color recolors every
+  character, Reset brings back their original colors.
+- The quick buttons act on the selection: Middle centers it on
+  the canvas, Reset restores how it looked when the editor
+  opened, Flip mirrors it, Duplicate copies it.
+- Opacity blends the selection over what is behind it, Hue
+  rotates its colors while keeping white and black readable.
+- Spacing & Alignment re-lays out the whole text; Canvas size
+  sets an exact image size and Crop to Content shrinks it
+  around the visible characters. Everything is undoable.
 """
 
     def _show_help(self):
@@ -2963,22 +2983,25 @@ Panels
             new_cx = cx + (rect.center().x() - cx) * factor
             new_cy = cy + (rect.center().y() - cy) * factor
             item.scale_pct = value
-            rendered = render_character(
-                item.tinted_sprite(compute=True),
-                value,
-                item.rotation,
-                item.rotation_quality,
-                item.stretch_x,
-                item.stretch_y,
-                item.flip_h,
-                item.flip_v,
-                item.opacity,
-            )
-            item._pix_cache[item._cache_key()] = rendered
-            w, h = rendered.size
+            cached = item._pix_cache.get(item._cache_key())
+            w = h = None
+            if cached is not None:
+                w, h = cached.size
+            elif item.rotation % 90 == 0:
+                w, h = unrotated_render_size(
+                    item.sprite, value, item.stretch_x, item.stretch_y
+                )
+                if item.rotation % 180:
+                    w, h = h, w
+            if w is None:
+                w = rect.width() * factor
+                h = rect.height() * factor
+                item._pending_center = QPointF(new_cx, new_cy)
+            else:
+                item._pending_center = None
             item.dx = round(new_cx - w / 2 - item.base_x)
             item.dy = round(new_cy - h / 2 - item.base_y)
-            item.update_pixmap()
+            item.request_render()
 
     def _on_scale_slider_changed(self, value):
         snapped = self._snap_scale_value(value)
@@ -3539,6 +3562,30 @@ Panels
     def _has_visible_items(self):
         return any(item.isVisible() for item in self.items)
 
+    def _prompt_save_location(self):
+        if load_config("skip_location_prompt", fallback=False):
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Welcome to MetalSlugFontReborn!")
+        box.setText(
+            "Your images will be saved to your Desktop by default.\n\n"
+            "Would you like to choose a different folder?"
+        )
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        remember = QCheckBox("Don't ask me again")
+        box.setCheckBox(remember)
+        if box.exec() == QMessageBox.StandardButton.Yes:
+            path = QFileDialog.getExistingDirectory(
+                self, "Choose Save Folder", str(self.params["save_path"])
+            )
+            if path:
+                self.params["save_path"] = path
+        if remember.isChecked():
+            save_config("skip_location_prompt", True)
+
     def _warn_nothing_to_export(self):
         QMessageBox.warning(
             self,
@@ -3553,6 +3600,7 @@ Panels
         if not self._has_visible_items():
             self._warn_nothing_to_export()
             return False
+        self._prompt_save_location()
         try:
             summary = self._export_image()
         except Image.DecompressionBombError as e:

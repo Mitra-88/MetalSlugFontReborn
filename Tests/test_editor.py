@@ -23,8 +23,13 @@ class _FakeRelease:
         return self._modifiers
 
 
-def make_dialog(tmp_path):
-    return AdvancedEditorDialog(None, make_params(tmp_path), get_font_charset(1))
+def make_dialog(tmp_path, worker_renders=False):
+    dialog = AdvancedEditorDialog(None, make_params(tmp_path), get_font_charset(1))
+    dialog._prompt_save_location = lambda: None
+    if not worker_renders:
+        for item in dialog.items:
+            item._dispatcher = None
+    return dialog
 
 
 def test_editor_reports_visible_items_and_canvas(qapp, tmp_path):
@@ -870,7 +875,7 @@ def test_zoom_entry_snaps_input_to_nearest_preset(qapp, tmp_path):
     dialog = make_dialog(tmp_path)
     try:
         entry = dialog.zoom_entry
-        entry.setText("33%")
+        entry.setText("33")
         entry._commit()
         assert abs(dialog.view.transform().m11() - ZOOM_SCALES[10]) < 1e-9
         entry.setText("9999")
@@ -878,7 +883,7 @@ def test_zoom_entry_snaps_input_to_nearest_preset(qapp, tmp_path):
         assert dialog.view.transform().m11() == ZOOM_SCALES[-1]
         entry.setText("nonsense")
         entry._commit()
-        assert entry.text() == f"{round(ZOOM_SCALES[-1] * 100)}%"
+        assert entry.text() == str(round(ZOOM_SCALES[-1] * 100))
     finally:
         dialog._dirty = False
         dialog.close()
@@ -916,7 +921,7 @@ def test_rotated_render_runs_on_worker_thread(qapp, tmp_path, monkeypatch):
 
     import editor as editor_module
 
-    dialog = make_dialog(tmp_path)
+    dialog = make_dialog(tmp_path, worker_renders=True)
     try:
         threads = []
         original = editor_module.render_character
@@ -1418,10 +1423,10 @@ def test_zoom_entry_stays_compact_and_grows_with_text(qapp, tmp_path):
         base = entry.minimumWidth()
         entry.set_zoom(2.0)
         assert entry.minimumWidth() == base
-        assert entry.text() == "200%"
+        assert entry.text() == "200"
         entry.set_zoom(64.0)
         assert entry.minimumWidth() > base
-        assert entry.text() == "6400%"
+        assert entry.text() == "6400"
         entry.set_zoom(1.0)
         assert entry.minimumWidth() == base
     finally:
@@ -1681,19 +1686,19 @@ def test_zoom_entry_updates_while_focused_until_user_types(qapp, tmp_path):
         qapp.processEvents()
         entry.hasFocus = lambda: True
         entry.set_zoom(4.0)
-        assert entry.text() == "400%"
+        assert entry.text() == "400"
         entry.setText("900")
         entry.setModified(True)
         entry.set_zoom(2.0)
         assert entry.text() == "900"
         entry._commit()
         assert dialog.view.transform().m11() == 8.0
-        assert entry.text() == "800%"
+        assert entry.text() == "800"
         assert not entry.isModified()
         entry.setText("nonsense")
         entry.setModified(True)
         entry._commit()
-        assert entry.text() == "800%"
+        assert entry.text() == "800"
     finally:
         dialog._dirty = False
         dialog.close()
@@ -1728,3 +1733,245 @@ def test_canvas_size_apply_and_crop_to_content(qapp, tmp_path):
     finally:
         dialog._dirty = False
         dialog.close()
+
+
+class _RecordingDispatcher:
+    def __init__(self):
+        self.requests = []
+
+    def request(self, item, key):
+        self.requests.append((item, key))
+
+
+def test_scale_slider_defers_render_to_worker(qapp, tmp_path, monkeypatch):
+    import threading
+
+    import editor as editor_module
+
+    dialog = make_dialog(tmp_path, worker_renders=True)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        gui_threads = []
+        original = editor_module.render_character
+
+        def spy(*args, **kwargs):
+            gui_threads.append(threading.get_ident())
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(editor_module, "render_character", spy)
+        center_before = item.sceneBoundingRect().center()
+        dialog._begin_slider_undo()
+        dialog.scale_slider.setValue(200)
+        assert item.scale_pct == 200
+        assert threading.get_ident() not in gui_threads
+        assert item._pix_cache.get(item._cache_key()) is None
+        dialog._end_slider_undo()
+        rendered = original(item.sprite, 200, 0)
+        item.apply_rendered(item.sprite, item._cache_key(), rendered)
+        assert item.pixmap().width() == rendered.width
+        assert item._pending_center is None
+        center_after = item.sceneBoundingRect().center()
+        assert abs(center_after.x() - center_before.x()) <= 1
+        assert abs(center_after.y() - center_before.y()) <= 1
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_scale_slider_recenters_rotated_item_on_render(qapp, tmp_path):
+    from editor import render_character
+
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        item.rotation = 45
+        dispatcher = _RecordingDispatcher()
+        item._dispatcher = dispatcher
+        dialog._apply_char_property("scale_pct", 200)
+        assert len(dispatcher.requests) == 1
+        assert item._pending_center is not None
+        pending = QPointF(item._pending_center)
+        rendered = render_character(item.sprite, 200, 45)
+        item.apply_rendered(item.sprite, item._cache_key(), rendered)
+        assert item._pending_center is None
+        center = item.sceneBoundingRect().center()
+        assert abs(center.x() - pending.x()) <= 1
+        assert abs(center.y() - pending.y()) <= 1
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_stale_scale_render_is_cached_but_not_shown(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        dispatcher = _RecordingDispatcher()
+        item._dispatcher = dispatcher
+        dialog._apply_char_property("scale_pct", 200)
+        stale_key = item._cache_key()
+        dialog._apply_char_property("scale_pct", 250)
+        height_before = item.pixmap().height()
+        item.apply_rendered(item.sprite, stale_key, item.sprite.copy())
+        assert stale_key in item._pix_cache
+        assert item._cache_key() != stale_key
+        assert item.pixmap().height() == height_before
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_scale_render_cache_revisits_are_synchronous(qapp, tmp_path):
+    from editor import render_character
+
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        dispatcher = _RecordingDispatcher()
+        item._dispatcher = dispatcher
+        dialog._apply_char_property("scale_pct", 250)
+        assert len(dispatcher.requests) == 1
+        rendered = render_character(item.sprite, 250, 0)
+        item.apply_rendered(item.sprite, item._cache_key(), rendered)
+        assert item.pixmap().width() == rendered.width
+        dialog._apply_char_property("scale_pct", 100)
+        assert item._pending_center is None
+        dialog._apply_char_property("scale_pct", 250)
+        assert len(dispatcher.requests) == 1
+        assert item._pending_center is None
+        assert item.pixmap().width() == rendered.width
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_scene_rect_growth_repaints_background(qapp, tmp_path):
+    dialog = make_dialog(tmp_path)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        dialog.view.zoom_to(12.0)
+        scene = dialog.scene
+        before = QRectF(scene.sceneRect())
+        regions = []
+        scene.changed.connect(regions.append)
+        item = dialog.items[0]
+        item.moveBy(before.width(), 0)
+        dialog._update_scene_rect()
+        qapp.processEvents()
+        after = scene.sceneRect()
+        assert after.right() > before.right()
+        assert regions
+        assert any(
+            region.right() > before.right()
+            for batch in regions
+            for region in batch
+        )
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+class _FakeStandardButtons:
+    Yes = 1
+    No = 2
+
+
+class _FakeMessageBox:
+    StandardButton = _FakeStandardButtons
+    next_result = _FakeStandardButtons.No
+    autocheck = False
+    last_instance = None
+
+    def __init__(self, parent):
+        self.checkbox = None
+        _FakeMessageBox.last_instance = self
+
+    def setWindowTitle(self, title):
+        self.title = title
+
+    def setText(self, text):
+        self.text = text
+
+    def setStandardButtons(self, buttons):
+        self.buttons = buttons
+
+    def setDefaultButton(self, button):
+        self.default = button
+
+    def setCheckBox(self, checkbox):
+        self.checkbox = checkbox
+        if _FakeMessageBox.autocheck:
+            checkbox.setChecked(True)
+
+    def exec(self):
+        return _FakeMessageBox.next_result
+
+
+def test_editor_save_prompt_offers_folder_and_remembers(qapp, tmp_path, monkeypatch):
+    import editor as editor_module
+
+    dialog = make_dialog(tmp_path)
+    try:
+        dialog._prompt_save_location = (
+            editor_module.AdvancedEditorDialog._prompt_save_location.__get__(dialog)
+        )
+        saved = []
+        monkeypatch.setattr(
+            editor_module, "load_config", lambda key, fallback=False: False
+        )
+        monkeypatch.setattr(
+            editor_module, "save_config", lambda key, value: saved.append(value)
+        )
+        monkeypatch.setattr(editor_module, "QMessageBox", _FakeMessageBox)
+
+        dialog._prompt_save_location()
+        assert _FakeMessageBox.last_instance is not None
+        assert dialog.params["save_path"] == str(tmp_path)
+        assert saved == []
+
+        _FakeMessageBox.next_result = _FakeStandardButtons.Yes
+        monkeypatch.setattr(
+            editor_module.QFileDialog,
+            "getExistingDirectory",
+            lambda *args, **kwargs: str(tmp_path / "chosen"),
+        )
+        dialog._prompt_save_location()
+        assert dialog.params["save_path"] == str(tmp_path / "chosen")
+        assert saved == []
+
+        _FakeMessageBox.autocheck = True
+        dialog._prompt_save_location()
+        assert saved == [True]
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_editor_save_prompt_respects_skip_flag(qapp, tmp_path, monkeypatch):
+    import editor as editor_module
+
+    dialog = make_dialog(tmp_path)
+    try:
+        dialog._prompt_save_location = (
+            editor_module.AdvancedEditorDialog._prompt_save_location.__get__(dialog)
+        )
+        monkeypatch.setattr(
+            editor_module, "load_config", lambda key, fallback=False: True
+        )
+        _FakeMessageBox.last_instance = None
+        dialog._prompt_save_location()
+        assert _FakeMessageBox.last_instance is None
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_help_text_stays_screen_sized():
+    from editor import AdvancedEditorDialog
+
+    assert len(AdvancedEditorDialog.HELP_TEXT.splitlines()) <= 44
