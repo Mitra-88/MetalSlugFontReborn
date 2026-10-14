@@ -155,6 +155,12 @@ jobs:
         run: |
           mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
 
+      - name: Cache smoke test apt packages
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: /var/cache/apt/archives
+          key: linux-smoke-apt-${{ hashFiles('.github/workflows/build.yml') }}
+
       - name: Headless smoke test
         run: |
           sudo apt-get update
