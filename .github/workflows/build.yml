@@ -141,9 +141,9 @@ jobs:
           rm -f PySide6/opengl32sw.dll PySide6/Qt6Network* PySide6/Qt6Svg* PySide6/libQt6Network* PySide6/libQt6Svg* libcrypto* libssl*
           rm -rf PySide6/Qt/translations PySide6/Qt/plugins/tls PySide6/Qt/plugins/networkinformation PySide6/Qt/plugins/generic PySide6/Qt/plugins/iconengines
           rm -f PySide6/Qt/lib/libQt6Network* PySide6/Qt/lib/libQt6Svg* PySide6/Qt/lib/libcrypto* PySide6/Qt/lib/libssl*
-          rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon*
-          if find . -name 'libxkbcommon*' | grep -q .; then
-            echo "::error::bundled libxkbcommon found: it must come from the user's system"
+          rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon* libX11* libXau* libXdmcp* libxcb* PySide6/Qt/lib/libX11* PySide6/Qt/lib/libxcb*
+          if find . -maxdepth 1 \( -name 'libxkbcommon*' -o -name 'libX11*' -o -name 'libXau*' -o -name 'libXdmcp*' -o -name 'libxcb*' \) | grep -q .; then
+            echo "::error::bundled X11 stack found: these libraries must come from the user's system"
             exit 1
           fi
 
@@ -186,7 +186,7 @@ jobs:
 
   build-macos:
     name: macOS
-    runs-on: macOS-15-arm64
+    runs-on: macos-latest
 
     steps:
       - name: Checkout code
