@@ -177,11 +177,17 @@ jobs:
             echo "===== CORE DUMP ====="
             echo "core_pattern: $(cat /proc/sys/kernel/core_pattern)"
             CORE=$(ls -t core* 2>/dev/null | head -1 || true)
+            if [ -z "$CORE" ] && command -v coredumpctl >/dev/null; then
+              coredumpctl list --no-pager 2>/dev/null | tail -5 || true
+              if coredumpctl dump --output=smoke-core MetalSlugFontReborn 2>/dev/null; then
+                CORE=smoke-core
+              fi
+            fi
             if [ -n "$CORE" ]; then
               sudo apt-get install -y gdb >/dev/null 2>&1
               gdb -q -batch -ex "thread apply all bt" ./MetalSlugFontReborn "$CORE" 2>&1 | tail -150 || true
             else
-              echo "no core file was produced (core_pattern may pipe to a handler); see APP OUTPUT above"
+              echo "no core dump available; see APP OUTPUT above"
             fi
           }
 
