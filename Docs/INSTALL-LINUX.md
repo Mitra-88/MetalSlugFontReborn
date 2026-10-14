@@ -1,5 +1,7 @@
 # **Linux:**
 
+**Requirements:** `libxkbcommon` (keyboard input), `libxcb-cursor0` (X11 cursor), and OpenGL/EGL system libraries. Every mainstream distro ships these; on Arch/EndeavourOS they are preinstalled, on Debian/Ubuntu: `sudo apt install libxkbcommon0 libxcb-cursor0 libegl1`.
+
 1. Get the latest release of [MetalSlugFontReborn](https://github.com/Mitra-88/MetalSlugFontReborn/releases/latest).
 
    ![Download MetalSlugFontReborn](Markdown/Docs/Download.png)

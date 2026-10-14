@@ -141,6 +141,7 @@ jobs:
           rm -f PySide6/opengl32sw.dll PySide6/Qt6Network* PySide6/Qt6Svg* PySide6/libQt6Network* PySide6/libQt6Svg* libcrypto* libssl*
           rm -rf PySide6/Qt/translations PySide6/Qt/plugins/tls PySide6/Qt/plugins/networkinformation PySide6/Qt/plugins/generic PySide6/Qt/plugins/iconengines
           rm -f PySide6/Qt/lib/libQt6Network* PySide6/Qt/lib/libQt6Svg* PySide6/Qt/lib/libcrypto* PySide6/Qt/lib/libssl*
+          rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon*
 
       - name: Move Assets
         run: |
