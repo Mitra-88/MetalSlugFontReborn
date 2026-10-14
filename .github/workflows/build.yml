@@ -156,14 +156,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 xvfb xdotool
           cd dist/MetalSlugFontReborn
+          ulimit -c unlimited
           Xvfb :99 -screen 0 1024x768x24 &
           XVFB_PID=$!
           sleep 2
-          DISPLAY=:99 ./MetalSlugFontReborn &
+          DISPLAY=:99 QT_LOGGING_RULES="*.debug=true" PYTHONFAULTHANDLER=1 ./MetalSlugFontReborn > smoke-app.log 2>&1 &
           APP_PID=$!
           sleep 12
+
+          collect_diagnostics() {
+            echo "===== APP OUTPUT (QT_LOGGING_RULES=*.debug=true, PYTHONFAULTHANDLER=1) ====="
+            tail -c 20000 smoke-app.log || true
+            echo "===== SYSTEM CONTEXT ====="
+            uname -a
+            head -2 /etc/os-release
+            echo "--- missing shared object deps ---"
+            ldd MetalSlugFontReborn 2>&1 | grep -i "not found" || echo "none missing"
+            echo "--- relevant env ---"
+            env | grep -E "^(QT_|DISPLAY|XDG)" || true
+            echo "===== CORE DUMP ====="
+            echo "core_pattern: $(cat /proc/sys/kernel/core_pattern)"
+            CORE=$(ls -t core* 2>/dev/null | head -1 || true)
+            if [ -n "$CORE" ]; then
+              sudo apt-get install -y gdb >/dev/null 2>&1
+              gdb -q -batch -ex "thread apply all bt" ./MetalSlugFontReborn "$CORE" 2>&1 | tail -150 || true
+            else
+              echo "no core file was produced (core_pattern may pipe to a handler); see APP OUTPUT above"
+            fi
+          }
+
           WID=$(DISPLAY=:99 xdotool search --onlyvisible --name "MetalSlugFontReborn" | head -1)
           if [ -z "$WID" ]; then
+            collect_diagnostics
             echo "::error::app window not found; it may have crashed at startup"
             exit 1
           fi
@@ -171,11 +195,13 @@ jobs:
           DISPLAY=:99 xdotool type --delay 120 "HELLO"
           sleep 2
           if ! kill -0 "$APP_PID" 2>/dev/null; then
+            collect_diagnostics
             echo "::error::app crashed while typing"
             exit 1
           fi
           kill "$APP_PID" 2>/dev/null || true
           kill "$XVFB_PID" 2>/dev/null || true
+          echo "smoke test passed: window found, HELLO typed, process alive"
 
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
