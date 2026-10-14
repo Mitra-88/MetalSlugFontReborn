@@ -142,10 +142,40 @@ jobs:
           rm -rf PySide6/Qt/translations PySide6/Qt/plugins/tls PySide6/Qt/plugins/networkinformation PySide6/Qt/plugins/generic PySide6/Qt/plugins/iconengines
           rm -f PySide6/Qt/lib/libQt6Network* PySide6/Qt/lib/libQt6Svg* PySide6/Qt/lib/libcrypto* PySide6/Qt/lib/libssl*
           rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon*
+          if find . -name 'libxkbcommon*' | grep -q .; then
+            echo "::error::bundled libxkbcommon found: it must come from the user's system"
+            exit 1
+          fi
 
       - name: Move Assets
         run: |
           mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
+
+      - name: Headless smoke test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 xvfb xdotool
+          cd dist/MetalSlugFontReborn
+          Xvfb :99 -screen 0 1024x768x24 &
+          XVFB_PID=$!
+          sleep 2
+          DISPLAY=:99 ./MetalSlugFontReborn &
+          APP_PID=$!
+          sleep 12
+          WID=$(DISPLAY=:99 xdotool search --onlyvisible --name "MetalSlugFontReborn" | head -1)
+          if [ -z "$WID" ]; then
+            echo "::error::app window not found; it may have crashed at startup"
+            exit 1
+          fi
+          DISPLAY=:99 xdotool windowfocus --sync "$WID"
+          DISPLAY=:99 xdotool type --delay 120 "HELLO"
+          sleep 2
+          if ! kill -0 "$APP_PID" 2>/dev/null; then
+            echo "::error::app crashed while typing"
+            exit 1
+          fi
+          kill "$APP_PID" 2>/dev/null || true
+          kill "$XVFB_PID" 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
