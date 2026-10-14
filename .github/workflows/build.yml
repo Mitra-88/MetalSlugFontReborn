@@ -141,9 +141,13 @@ jobs:
           rm -f PySide6/opengl32sw.dll PySide6/Qt6Network* PySide6/Qt6Svg* PySide6/libQt6Network* PySide6/libQt6Svg* libcrypto* libssl*
           rm -rf PySide6/Qt/translations PySide6/Qt/plugins/tls PySide6/Qt/plugins/networkinformation PySide6/Qt/plugins/generic PySide6/Qt/plugins/iconengines
           rm -f PySide6/Qt/lib/libQt6Network* PySide6/Qt/lib/libQt6Svg* PySide6/Qt/lib/libcrypto* PySide6/Qt/lib/libssl*
-          rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon* libX11* libXau* libXdmcp* libxcb* PySide6/Qt/lib/libX11* PySide6/Qt/lib/libxcb*
+          rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon* libX11* libXau* libXdmcp* libxcb* PySide6/Qt/lib/libX11* PySide6/Qt/lib/libxcb.so.*
           if find . -maxdepth 1 \( -name 'libxkbcommon*' -o -name 'libX11*' -o -name 'libXau*' -o -name 'libXdmcp*' -o -name 'libxcb*' \) | grep -q .; then
             echo "::error::bundled X11 stack found: these libraries must come from the user's system"
+            exit 1
+          fi
+          if find PySide6/Qt/lib -name 'libX11*' -o -name 'libxkbcommon*' -o -name 'libxcb.so.*' | grep -q .; then
+            echo "::error::bundled core X11 libraries found in PySide6/Qt/lib"
             exit 1
           fi
 
