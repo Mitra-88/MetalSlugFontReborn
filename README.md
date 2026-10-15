@@ -93,11 +93,11 @@ MetalSlugFontReborn is a free, open-source desktop app built with PySide6 and Pi
 
 > **macOS:** Built for Apple Silicon. I don't own a Mac to verify, but it should work.
 
-> **Linux:** Tested on the distributions above with Wayland. If the app crashes when typing, switch your display server to Wayland that usually fixes it. You can also use the [web app](https://metalslugfontrebornsolid2.mitra88dev.workers.dev/) (everything except the editor, no install) or [build from source](Docs/BUILD.md) (it's easy, trust me!)
+> **Linux:** Tested on the distributions above. The app runs under X11 by default and also works on Wayland through XWayland, so the window manager provides the title bar and resize borders. You can also use the [web app](https://metalslugfontrebornsolid2.mitra88dev.workers.dev/) (everything except the editor, no install) or [build from source](Docs/BUILD.md) (it's easy, trust me!)
 
 ### Resource Footprint
 - **RAM Usage:** ~45-150MB (varies with OS)
-- **Disk Space:** ~75-250MB (varies with OS)
+- **Disk Space:** ~65-130MB (varies with OS)
 
 > If your system doesn't meet these requirements, try the [web app](https://metalslugfontrebornsolid2.mitra88dev.workers.dev/). It runs in any modern browser with every feature except the advanced editor.
 
@@ -137,10 +137,9 @@ I want to say a big thank you to the individuals who helped me.
 - [PySide6](https://doc.qt.io/qtforpython-6/): For the GUI
 - [Pillow](https://pillow.readthedocs.io/en/stable/): For image processing
 - [PyInstaller](https://pyinstaller.org/en/stable): For compiling the program
-- [Python Prompt Toolkit](https://python-prompt-toolkit.readthedocs.io/en/master/): For the CLI Autocompletion
 - [Ruff](https://docs.astral.sh/ruff/): Python linter and code formatter.
 - [SkyblockerMod](https://github.com/SkyblockerMod/Skyblocker): Issue Template.
-- [Aseprite](https://github.com/aseprite/aseprite): Build template.
+- [Aseprite](https://github.com/aseprite/aseprite): Reference for the rotation algorithm and the advanced editor's design.
 
 ## Disclaimer
 
