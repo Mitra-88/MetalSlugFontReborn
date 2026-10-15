@@ -179,11 +179,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libxkbcommon-x11-0 x11-utils xvfb xdotool openbox
           cd dist/MetalSlugFontReborn
-          cat > config.toml <<'EOF'
-theme = "Light"
-skip_location_prompt = true
-skip_theme_prompt = true
-EOF
+          printf '%s\n' 'theme = "Light"' 'skip_location_prompt = true' 'skip_theme_prompt = true' > config.toml
           ulimit -c unlimited
           Xvfb :99 -screen 0 1024x768x24 &
           XVFB_PID=$!
