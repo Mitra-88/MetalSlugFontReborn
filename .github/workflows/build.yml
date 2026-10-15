@@ -161,6 +161,7 @@ jobs:
           rm -f PySide6/Qt/plugins/platformthemes/libqgtk3.so
           rm -f libgtk-3* libgdk-3* libgdk_pixbuf* libpango* libatk* libcairo* libpixman* libgobject* libgio*
           rm -f PIL/_avif* pillow.libs/libavif* libavif* libgssapi_krb5* libkrb5* libk5crypto* libcom_err* libkeyutils*
+          for f in pillow.libs/*.so*; do b=$(basename "$f"); if [ -L "$b" ]; then rm -f "$b"; fi; done
           for f in PySide6/Qt/lib/*.so*; do b=$(basename "$f"); if [ -L "$b" ]; then rm -f "$b"; fi; done
           rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon* libX11* libXau* libXdmcp* libxcb* PySide6/Qt/lib/libX11* PySide6/Qt/lib/libxcb.so.*
           if find . -maxdepth 1 \( -name 'libxkbcommon*' -o -name 'libX11*' -o -name 'libXau*' -o -name 'libXdmcp*' -o -name 'libxcb*' \) | grep -q .; then
@@ -179,12 +180,14 @@ jobs:
       - name: Cache smoke test apt packages
         uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
         with:
-          path: /var/cache/apt/archives
+          path: ~/apt-archives
           key: linux-smoke-apt-${{ hashFiles('.github/workflows/build.yml') }}
 
       - name: Headless smoke test
         run: |
           sudo apt-get update
+          mkdir -p ~/apt-archives
+          sudo cp ~/apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null || true
           sudo apt-get install -y libegl1 libxkbcommon-x11-0 x11-utils xvfb xdotool openbox
           cd dist/MetalSlugFontReborn
           printf '%s\n' 'theme = "Light"' 'skip_location_prompt = true' 'skip_theme_prompt = true' > config.toml
@@ -268,6 +271,8 @@ jobs:
           kill "$OPENBOX_PID" 2>/dev/null || true
           kill "$XVFB_PID" 2>/dev/null || true
           rm -f config.toml smoke-app.log core smoke-core
+          sudo cp /var/cache/apt/archives/*.deb ~/apt-archives/ 2>/dev/null || true
+          sudo chown -R $(id -u):$(id -g) ~/apt-archives
           echo "smoke test passed: window focused, HELLO typed, title counts 5 characters, process alive"
 
       - name: Upload artifact
@@ -289,6 +294,7 @@ jobs:
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          mkdir -p ~/Library/Caches/uv
 
       - name: Install Python
         run: uv python install 3.15
@@ -389,6 +395,11 @@ jobs:
       - name: Build the profiler
         run: |
           pyinstaller --noconfirm --onedir --console --clean --icon "Assets/Icons/Raubtier.ico" --name "MSFRProfiler" --paths Src --add-data "Assets;Assets/" Tools/sample_profiler.py
+
+      - name: Trim unused components
+        run: |
+          cd dist/MSFRProfiler/_internal
+          rm -f PIL/_avif*.pyd
 
       - name: Move Assets
         run: |
