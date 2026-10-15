@@ -169,7 +169,7 @@ jobs:
       - name: Headless smoke test
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libxkbcommon-x11-0 xvfb xdotool
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 x11-utils xvfb xdotool
           cd dist/MetalSlugFontReborn
           ulimit -c unlimited
           Xvfb :99 -screen 0 1024x768x24 &
@@ -181,7 +181,10 @@ jobs:
 
           collect_diagnostics() {
             echo "===== APP OUTPUT (QT_LOGGING_RULES=*.debug=true, PYTHONFAULTHANDLER=1) ====="
-            tail -c 20000 smoke-app.log || true
+            echo "--- error-ish lines ---"
+            grep -anE "cannot load|Could not|error|Error|ERROR|Fatal|fault|Traceback|not found|Aborted" smoke-app.log | head -50 || true
+            echo "--- first 120 lines ---"
+            head -120 smoke-app.log || true
             echo "===== SYSTEM CONTEXT ====="
             uname -a
             head -2 /etc/os-release
@@ -206,10 +209,23 @@ jobs:
             fi
           }
 
-          WID=$(DISPLAY=:99 xdotool search --onlyvisible --name "MetalSlugFontReborn" | head -1)
+          WID=$(DISPLAY=:99 xdotool search --onlyvisible --name "MetalSlugFontReborn" 2>/dev/null | head -1)
+          if [ -z "$WID" ]; then
+            WID=$(DISPLAY=:99 xdotool search --name "MetalSlugFontReborn" 2>/dev/null | head -1)
+          fi
+          if [ -z "$WID" ]; then
+            WID=$(DISPLAY=:99 xdotool search --class "MetalSlugFontReborn" 2>/dev/null | head -1)
+          fi
           if [ -z "$WID" ]; then
             collect_diagnostics
-            echo "::error::app window not found; it may have crashed at startup"
+            echo "===== WINDOW TREE ====="
+            DISPLAY=:99 xwininfo -root -tree 2>&1 | head -40 || true
+            if kill -0 "$APP_PID" 2>/dev/null; then
+              echo "app process is ALIVE but no window matched the searches"
+            else
+              echo "app process is DEAD"
+            fi
+            echo "::error::app window not found; see diagnostics above"
             exit 1
           fi
           DISPLAY=:99 xdotool windowfocus --sync "$WID"
