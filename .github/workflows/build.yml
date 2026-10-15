@@ -87,6 +87,8 @@ jobs:
           find PySide6/plugins/imageformats -type f ! -name "*qico*" -delete
           rm -f PIL/_avif*.pyd
           rm -f PySide6/QtNetwork.pyd PySide6/QtDBus.pyd PIL/_imagingtk*.pyd PIL/ImageTk.py PIL/AvfImagePlugin.py PIL/Jpeg2KImagePlugin.py
+          rm -f PySide6/plugins/platforms/qdirect2d.dll
+          rm -f PIL/_webp*.pyd PIL/_imagingcms*.pyd PIL/_imagingmath*.pyd
 
       - name: Move Assets
         run: |
@@ -181,6 +183,10 @@ jobs:
           rm -f libgtk-3* libgdk-3* libgdk_pixbuf* libpango* libatk* libcairo* libpixman* libgobject* libgio*
           rm -f PIL/_avif* pillow.libs/libavif* libavif* libgssapi_krb5* libkrb5* libk5crypto* libcom_err* libkeyutils*
           rm -f PySide6/QtNetwork.abi3* PySide6/QtDBus.abi3* PIL/_imagingtk* PIL/ImageTk.py PIL/AvfImagePlugin.py PIL/Jpeg2KImagePlugin.py
+          rm -rf PySide6/Qt/plugins/wayland-decoration-client PySide6/Qt/plugins/wayland-graphics-integration-client PySide6/Qt/plugins/wayland-shell-integration PySide6/Qt/plugins/xcbglintegrations
+          rm -f PySide6/Qt/plugins/platforminputcontexts/libibusplatforminputcontextplugin.so libepoxy*
+          rm -f PIL/_webp* PIL/_imagingcms* PIL/_imagingmath*
+          rm -f pillow.libs/libwebp* pillow.libs/libsharpyuv* pillow.libs/liblcms2*
           for f in pillow.libs/*.so*; do b=$(basename "$f"); if [ -L "$b" ]; then rm -f "$b"; fi; done
           for f in PySide6/Qt/lib/*.so*; do b=$(basename "$f"); if [ -L "$b" ]; then rm -f "$b"; fi; done
           rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon* libX11* libXau* libXdmcp* libxcb* PySide6/Qt/lib/libX11* PySide6/Qt/lib/libxcb.so.*
@@ -369,11 +375,28 @@ jobs:
           find PySide6/plugins/imageformats PySide6/Qt/plugins/imageformats -type f ! -name "*qico*" -delete 2>/dev/null || true
           rm -f PIL/_avif* libavif*
           rm -f PySide6/QtNetwork.abi3* PySide6/QtDBus.abi3* PIL/_imagingtk* PIL/ImageTk.py PIL/AvfImagePlugin.py PIL/Jpeg2KImagePlugin.py
+          rm -f PIL/_webp* PIL/_imagingcms* PIL/_imagingmath* libwebp* libsharpyuv* liblcms2*
+          for f in PySide6/Qt/lib/*.framework; do rm -f "$f/$(basename "$f" .framework)"; rm -rf "$f/Versions/Current" "$f/Resources"; done
           rm -rf PySide6/Qt/lib/QtNetwork.framework PySide6/Qt/lib/QtSvg.framework PySide6/Qt/lib/QtDBus.framework
 
       - name: Move Assets
         run: |
           mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
+
+      - name: Offscreen smoke test
+        run: |
+          cd dist/MetalSlugFontReborn
+          printf '%s\n' 'theme = "Light"' 'skip_location_prompt = true' 'skip_theme_prompt = true' > config.toml
+          QT_QPA_PLATFORM=offscreen ./MetalSlugFontReborn > smoke-app.log 2>&1 &
+          APP_PID=$!
+          sleep 15
+          if ! kill -0 "$APP_PID" 2>/dev/null; then
+            echo "::error::macOS app died at startup"
+            tail -c 8000 smoke-app.log || true
+            exit 1
+          fi
+          kill "$APP_PID" 2>/dev/null || true
+          rm -f config.toml smoke-app.log
 
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -431,6 +454,7 @@ jobs:
         run: |
           cd dist/MSFRProfiler/_internal
           rm -f PIL/_avif*.pyd
+          rm -f PIL/_webp*.pyd PIL/_imagingcms*.pyd PIL/_imagingmath*.pyd PIL/_imagingtk*.pyd PIL/ImageTk.py PIL/AvfImagePlugin.py PIL/Jpeg2KImagePlugin.py
 
       - name: Move Assets
         run: |
