@@ -2078,6 +2078,7 @@ def test_appearance_sliders_render_on_worker(qapp, tmp_path):
         dispatcher = _RecordingDispatcher()
         item._dispatcher = dispatcher
         dialog._on_appearance_slider_changed("contrast", 200)
+        dialog._flush_all_debounced()
         assert len(dispatcher.requests) == 1
         requested_key = dispatcher.requests[0][1]
         assert requested_key[10] == 200

@@ -133,6 +133,7 @@ MARQUEE_CLICK_PX = 3
 BORDER_TINT = 0.35
 PASTEBOARD_TINT = 0.45
 GESTURE_UPDATE_MS = 16
+SLIDER_DEBOUNCE_MS = 25
 
 
 def _blend(base, target, amount):
@@ -1956,6 +1957,8 @@ class AdvancedEditorDialog(QDialog):
         self._fitted = False
         self._sprite_provider = self._sprite_for
         self._render_dispatcher = RenderDispatcher(self)
+        self._debounced_properties = {}
+        self._debounce_timers = {}
         self._build_scene()
         self._build_ui()
         self._connect_selection()
@@ -3209,9 +3212,11 @@ undoable.</li>
             widget.blockSignals(True)
             widget.setValue(snapped)
             widget.blockSignals(False)
-        self._apply_char_property(
-            "scale_pct", snapped, push=not self._in_slider_gesture()
-        )
+        push = not self._in_slider_gesture()
+        if push:
+            self._debounce_property("scale_pct", snapped, True)
+        else:
+            self._apply_char_property("scale_pct", snapped, push=False)
 
     def _on_scale_spin_changed(self, value):
         self.scale_slider.blockSignals(True)
@@ -3225,9 +3230,11 @@ undoable.</li>
             widget.blockSignals(True)
             widget.setValue(snapped)
             widget.blockSignals(False)
-        self._apply_char_property(
-            "rotation", snapped, push=not self._in_slider_gesture()
-        )
+        push = not self._in_slider_gesture()
+        if push:
+            self._debounce_property("rotation", snapped, True)
+        else:
+            self._apply_char_property("rotation", snapped, push=False)
 
     def _on_rotation_spin_changed(self, value):
         self.rotation_slider.blockSignals(True)
@@ -3240,9 +3247,11 @@ undoable.</li>
             widget.blockSignals(True)
             widget.setValue(value)
             widget.blockSignals(False)
-        self._apply_char_property(
-            "opacity", value, push=not self._in_slider_gesture()
-        )
+        push = not self._in_slider_gesture()
+        if push:
+            self._debounce_property("opacity", value, True)
+        else:
+            self._apply_char_property("opacity", value, push=False)
 
     def _on_opacity_spin_changed(self, value):
         self.opacity_slider.blockSignals(True)
@@ -3255,9 +3264,11 @@ undoable.</li>
             widget.blockSignals(True)
             widget.setValue(value)
             widget.blockSignals(False)
-        self._apply_char_property(
-            "hue_shift", value, push=not self._in_slider_gesture()
-        )
+        push = not self._in_slider_gesture()
+        if push:
+            self._debounce_property("hue_shift", value, True)
+        else:
+            self._apply_char_property("hue_shift", value, push=False)
 
     def _on_hue_spin_changed(self, value):
         self.hue_slider.blockSignals(True)
@@ -3271,9 +3282,11 @@ undoable.</li>
             widget.blockSignals(True)
             widget.setValue(value)
             widget.blockSignals(False)
-        self._apply_char_property(
-            attr, value, push=not self._in_slider_gesture()
-        )
+        push = not self._in_slider_gesture()
+        if push:
+            self._debounce_property(attr, value, True)
+        else:
+            self._apply_char_property(attr, value, push=False)
 
     def _on_appearance_spin_changed(self, attr, value):
         slider = getattr(self, f"{attr}_slider")
@@ -3288,6 +3301,34 @@ undoable.</li>
     def _in_slider_gesture(self):
         return getattr(self, "_slider_undo_before", None) is not None
 
+    def _debounce_property(self, attr, value, push):
+        timer = self._debounce_timers.get(attr)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(SLIDER_DEBOUNCE_MS)
+            timer.timeout.connect(
+                lambda checked=False, attr=attr: self._flush_debounced_property(attr)
+            )
+            self._debounce_timers[attr] = timer
+        self._debounced_properties[attr] = (value, push)
+        timer.start()
+
+    def _flush_debounced_property(self, attr):
+        pending = self._debounced_properties.pop(attr, None)
+        if pending is None:
+            return
+        if self._in_canvas_gesture():
+            self._debounced_properties[attr] = pending
+            self._debounce_timers[attr].start()
+            return
+        self._debounce_timers[attr].stop()
+        self._apply_char_property(attr, pending[0], push=pending[1])
+
+    def _flush_all_debounced(self):
+        for attr in list(self._debounced_properties):
+            self._flush_debounced_property(attr)
+
     def _in_canvas_gesture(self):
         return (
             self._drag_before is not None
@@ -3295,6 +3336,7 @@ undoable.</li>
         )
 
     def _begin_slider_undo(self):
+        self._flush_all_debounced()
         snapshot = self._snapshot_selected()
         self._slider_undo_before = snapshot or None
 
