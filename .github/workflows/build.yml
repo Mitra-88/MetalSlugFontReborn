@@ -212,26 +212,27 @@ jobs:
             fi
           }
 
-          WID=$(DISPLAY=:99 xdotool search --onlyvisible --name "MetalSlugFontReborn" 2>/dev/null | head -1)
-          if [ -z "$WID" ]; then
-            WID=$(DISPLAY=:99 xdotool search --name "MetalSlugFontReborn" 2>/dev/null | head -1)
-          fi
-          if [ -z "$WID" ]; then
-            WID=$(DISPLAY=:99 xdotool search --class "MetalSlugFontReborn" 2>/dev/null | head -1)
-          fi
+          WID=""
+          for wid in $(DISPLAY=:99 xdotool search --name "MetalSlugFontReborn" 2>/dev/null); do
+            if DISPLAY=:99 xwininfo -id "$wid" 2>/dev/null | grep -q "Map State: IsViewable"; then
+              WID="$wid"
+              break
+            fi
+          done
           if [ -z "$WID" ]; then
             collect_diagnostics
             echo "===== WINDOW TREE ====="
             DISPLAY=:99 xwininfo -root -tree 2>&1 | head -40 || true
             if kill -0 "$APP_PID" 2>/dev/null; then
-              echo "app process is ALIVE but no window matched the searches"
+              echo "app process is ALIVE but no viewable window matched the searches"
             else
               echo "app process is DEAD"
             fi
             echo "::error::app window not found; see diagnostics above"
             exit 1
           fi
-          DISPLAY=:99 xdotool windowfocus --sync "$WID"
+          DISPLAY=:99 xdotool windowactivate --sync "$WID" 2>/dev/null || DISPLAY=:99 xdotool windowfocus "$WID" 2>/dev/null || true
+          sleep 1
           DISPLAY=:99 xdotool type --delay 120 "HELLO"
           sleep 2
           if ! kill -0 "$APP_PID" 2>/dev/null; then
@@ -239,10 +240,17 @@ jobs:
             echo "::error::app crashed while typing"
             exit 1
           fi
+          TITLE=$(DISPLAY=:99 xdotool getwindowname "$WID" 2>/dev/null || echo "")
+          if ! echo "$TITLE" | grep -q "5 characters"; then
+            collect_diagnostics
+            echo "window title after typing: $TITLE"
+            echo "::error::keystrokes did not reach the app (title does not count 5 characters)"
+            exit 1
+          fi
           kill "$APP_PID" 2>/dev/null || true
           kill "$OPENBOX_PID" 2>/dev/null || true
           kill "$XVFB_PID" 2>/dev/null || true
-          echo "smoke test passed: window found, HELLO typed, process alive"
+          echo "smoke test passed: window focused, HELLO typed, title counts 5 characters, process alive"
 
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
