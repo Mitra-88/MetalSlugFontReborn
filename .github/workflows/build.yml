@@ -377,7 +377,7 @@ jobs:
           rm -f PySide6/QtNetwork.abi3* PySide6/QtDBus.abi3* PIL/_imagingtk* PIL/ImageTk.py PIL/AvfImagePlugin.py PIL/Jpeg2KImagePlugin.py
           rm -f PIL/_webp* PIL/_imagingcms* PIL/_imagingmath* libwebp* libsharpyuv* liblcms2*
           for f in PySide6/Qt/lib/*.framework; do rm -f "$f/$(basename "$f" .framework)"; rm -rf "$f/Versions/Current" "$f/Resources"; done
-          rm -rf PySide6/Qt/lib/QtNetwork.framework PySide6/Qt/lib/QtSvg.framework PySide6/Qt/lib/QtDBus.framework
+          rm -rf PySide6/Qt/lib/QtNetwork.framework PySide6/Qt/lib/QtSvg.framework
 
       - name: Move Assets
         run: |
