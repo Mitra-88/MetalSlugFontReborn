@@ -49,7 +49,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Windows (PowerShell)
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
-- [Rust](https://www.rust-lang.org/tools/install) 1.99 or later (the crate uses the 2024 edition), for the native rotation library. Without it the build still works and rotation falls back to a slower pure-Python engine.
+- [Rust](https://www.rust-lang.org/tools/install) 1.85 or later (the crate uses the 2024 edition), for the native rotation library. Without it the build still works and rotation falls back to a slower pure-Python engine.
 
 The remaining requirements are installed by `uv sync` from `pyproject.toml` and `uv.lock`, so you do not need to install them by hand:
 
@@ -75,9 +75,8 @@ cargo build --release --manifest-path rust\rotsprite-rs\Cargo.toml
 ```sh
 uv run pyinstaller --noconfirm --onedir --windowed --icon "Assets/Icons/Raubtier.ico" --name "MetalSlugFontReborn" --clean --optimize "2" --version-file "versionfile.txt" --add-data "Src/build_commit.txt;." --add-data "LICENSE;." --add-data "Assets;Assets/" --add-binary "rust/rotsprite-rs/target/release/msfr_rotsprite.dll;."  "Src/main.py"
 Move-Item -Path "dist\MetalSlugFontReborn\_internal\Assets" -Destination "dist\MetalSlugFontReborn"
-Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "dist\MetalSlugFontReborn\_internal\PySide6\translations", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\tls", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\networkinformation", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\generic", "dist\MetalSlugFontReborn\_internal\PySide6\plugins\iconengines", "dist\MetalSlugFontReborn\_internal\setuptools"
-Remove-Item -Force -ErrorAction SilentlyContinue "dist\MetalSlugFontReborn\_internal\PySide6\opengl32sw.dll", "dist\MetalSlugFontReborn\_internal\PySide6\Qt6Network.dll", "dist\MetalSlugFontReborn\_internal\PySide6\Qt6Svg.dll", "dist\MetalSlugFontReborn\_internal\libcrypto-3-x64.dll", "dist\MetalSlugFontReborn\_internal\libssl-3-x64.dll"
 ```
+Then run the "Trim unused Qt components" step for your OS from [.github/workflows/build.yml](../.github/workflows/build.yml), which is the single source of truth for what gets removed (unused Qt modules like Network, Svg and the Wayland stack, unused image format plugins, dead Pillow codecs, and the core X11 libraries on Linux). Skip that step and the build still works, it is just 40-70% larger.
 
 ---
 
@@ -115,10 +114,7 @@ cargo build --release --manifest-path rust/rotsprite-rs/Cargo.toml
 ```sh
 uv run pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/build_commit.txt:." --add-data "LICENSE:." --add-data "Assets:Assets/" --add-binary "rust/rotsprite-rs/target/release/libmsfr_rotsprite.so:."  "Src/main.py"
 mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
-rm -rf dist/MetalSlugFontReborn/_internal/PySide6/translations dist/MetalSlugFontReborn/_internal/PySide6/plugins/tls dist/MetalSlugFontReborn/_internal/PySide6/plugins/networkinformation dist/MetalSlugFontReborn/_internal/PySide6/plugins/generic dist/MetalSlugFontReborn/_internal/PySide6/plugins/iconengines dist/MetalSlugFontReborn/_internal/setuptools
-rm -f dist/MetalSlugFontReborn/_internal/PySide6/Qt6Network* dist/MetalSlugFontReborn/_internal/PySide6/Qt6Svg* dist/MetalSlugFontReborn/_internal/libcrypto* dist/MetalSlugFontReborn/_internal/libssl*
-rm -rf dist/MetalSlugFontReborn/_internal/PySide6/Qt/translations dist/MetalSlugFontReborn/_internal/PySide6/Qt/plugins/tls dist/MetalSlugFontReborn/_internal/PySide6/Qt/plugins/networkinformation dist/MetalSlugFontReborn/_internal/PySide6/Qt/plugins/generic dist/MetalSlugFontReborn/_internal/PySide6/Qt/plugins/iconengines
-rm -f dist/MetalSlugFontReborn/_internal/PySide6/Qt/lib/libQt6Network* dist/MetalSlugFontReborn/_internal/PySide6/Qt/lib/libQt6Svg* dist/MetalSlugFontReborn/_internal/PySide6/Qt/lib/libcrypto* dist/MetalSlugFontReborn/_internal/PySide6/Qt/lib/libssl*
 ```
+Then run the Linux (or macOS) "Trim unused Qt components" step from [.github/workflows/build.yml](../.github/workflows/build.yml). On Linux this also deletes the bundled core X11 libraries (libX11, libxcb, libxkbcommon): they must come from the user's system, and the workflow's bundle assertions fail the build if they ever come back.
 
 On macOS the rotation library is named `libmsfr_rotsprite.dylib`, so use that file name in the `--add-binary` flag.
