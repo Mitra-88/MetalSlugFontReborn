@@ -51,6 +51,15 @@ jobs:
         shell: pwsh
         run: echo "$env:GITHUB_WORKSPACE\.venv\Scripts" >> $env:GITHUB_PATH
 
+      - name: Restore cargo cache
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/rotsprite-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/rotsprite-rs/Cargo.lock') }}
+
       - name: Get short SHA
         id: sha
         run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
@@ -77,6 +86,7 @@ jobs:
           rm -f PySide6/opengl32sw.dll PySide6/Qt6Network* PySide6/Qt6Svg* PySide6/Qt6OpenGL* PySide6/Qt6DBus* PySide6/Qt6Qml* PySide6/Qt6Quick* PySide6/Qt6Pdf* PySide6/Qt6Test* PySide6/Qt6Sql* PySide6/Qt6Help* PySide6/Qt6Designer* PySide6/Qt6UiTools* PySide6/Qt6Xml* PySide6/Qt6Concurrent* PySide6/Qt6PrintSupport* PySide6/Qt6WaylandClient* libcrypto-3-x64.dll libssl-3-x64.dll
           find PySide6/plugins/imageformats -type f ! -name "*qico*" -delete
           rm -f PIL/_avif*.pyd
+          rm -f PySide6/QtNetwork.pyd PySide6/QtDBus.pyd PIL/_imagingtk*.pyd PIL/ImageTk.py PIL/AvfImagePlugin.py PIL/Jpeg2KImagePlugin.py
 
       - name: Move Assets
         run: |
@@ -127,6 +137,15 @@ jobs:
       - name: Write build commit
         run: git rev-parse --short HEAD > Src/build_commit.txt
 
+      - name: Restore cargo cache
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/rotsprite-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/rotsprite-rs/Cargo.lock') }}
+
       - name: Install xcb libraries for bundling
         run: |
           sudo apt-get update
@@ -161,6 +180,7 @@ jobs:
           rm -f PySide6/Qt/plugins/platformthemes/libqgtk3.so
           rm -f libgtk-3* libgdk-3* libgdk_pixbuf* libpango* libatk* libcairo* libpixman* libgobject* libgio*
           rm -f PIL/_avif* pillow.libs/libavif* libavif* libgssapi_krb5* libkrb5* libk5crypto* libcom_err* libkeyutils*
+          rm -f PySide6/QtNetwork.abi3* PySide6/QtDBus.abi3* PIL/_imagingtk* PIL/ImageTk.py PIL/AvfImagePlugin.py PIL/Jpeg2KImagePlugin.py
           for f in pillow.libs/*.so*; do b=$(basename "$f"); if [ -L "$b" ]; then rm -f "$b"; fi; done
           for f in PySide6/Qt/lib/*.so*; do b=$(basename "$f"); if [ -L "$b" ]; then rm -f "$b"; fi; done
           rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon* libX11* libXau* libXdmcp* libxcb* PySide6/Qt/lib/libX11* PySide6/Qt/lib/libxcb.so.*
@@ -296,6 +316,15 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           mkdir -p ~/Library/Caches/uv
 
+      - name: Restore cargo cache
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/rotsprite-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/rotsprite-rs/Cargo.lock') }}
+
       - name: Install Python
         run: uv python install 3.15
 
@@ -339,6 +368,7 @@ jobs:
           rm -f PySide6/Qt/lib/libQt6Network* PySide6/Qt/lib/libQt6Svg* PySide6/Qt/lib/libQt6OpenGL* PySide6/Qt/lib/libQt6DBus* PySide6/Qt/lib/libcrypto* PySide6/Qt/lib/libssl*
           find PySide6/plugins/imageformats PySide6/Qt/plugins/imageformats -type f ! -name "*qico*" -delete 2>/dev/null || true
           rm -f PIL/_avif* libavif*
+          rm -f PySide6/QtNetwork.abi3* PySide6/QtDBus.abi3* PIL/_imagingtk* PIL/ImageTk.py PIL/AvfImagePlugin.py PIL/Jpeg2KImagePlugin.py
           rm -rf PySide6/Qt/lib/QtNetwork.framework PySide6/Qt/lib/QtSvg.framework PySide6/Qt/lib/QtDBus.framework
 
       - name: Move Assets
