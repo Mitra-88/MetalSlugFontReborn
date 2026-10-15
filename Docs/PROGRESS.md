@@ -4,8 +4,8 @@ This document provides an overview of the latest updates, milestones, and upcomi
 
 ## Current Status
 
-- **Stable Version**: 3.2.0
-- **Release Date**: 2026-10-13
+- **Stable Version**: 3.2.1
+- **Release Date**: 2026-10-15
 - **Maintainer**: Mitra-88
 
 ## Achieved Milestones
@@ -46,7 +46,15 @@ This document provides an overview of the latest updates, milestones, and upcomi
   - **Date Achieved**: 2026-09-08
   - **Description**: Introduced a beta Advanced Mode, a per-character sprite editor allowing drag, scale, rotation, replacement and deletion of individual characters, multi-select group operations, spacing and alignment controls, object snapping with guide lines, undo/redo, and canvas zoom/pan.
 
+- **Milestone 10: Interface Overhaul**
+  - **Date Achieved**: 2026-10-13
+  - **Description**: Reworked the main window (fit-to-view preview, collapsible output settings, unsupported-character hinting) and overhauled the advanced editor with Aseprite-style on-canvas transforms, smart snapping, a full undo/redo stack and asynchronous rendering.
+
+- **Milestone 11: Packaging Overhaul**
+  - **Date Achieved**: 2026-10-15
+  - **Description**: Cut release download sizes dramatically (Linux ~92 to ~52 MB, macOS ~62 to ~38 MB, Windows ~33 to ~28 MB) by trimming unused Qt and Pillow components, added post-build bundle assertions and GUI smoke tests on every platform, and fixed the Linux typing crash and the Windows taskbar icon.
+
 ## Planned Milestones
 
-- **Milestone 10: Sprite Spacing Corrections** (pending)
+- **Milestone 12: Sprite Spacing Corrections** (pending)
   - **Description**: Correct the spacing of some sprites.
