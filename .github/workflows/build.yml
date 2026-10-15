@@ -397,6 +397,7 @@ jobs:
           pyinstaller --noconfirm --onedir --console --clean --icon "Assets/Icons/Raubtier.ico" --name "MSFRProfiler" --paths Src --add-data "Assets;Assets/" Tools/sample_profiler.py
 
       - name: Trim unused components
+        shell: bash
         run: |
           cd dist/MSFRProfiler/_internal
           rm -f PIL/_avif*.pyd
