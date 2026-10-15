@@ -6,13 +6,13 @@
 
 <p align="center">
   <a href="https://www.python.org/">
-    <img alt="Python" src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=FFD43B" />
+    <img alt="Python" src="https://img.shields.io/badge/Python-3.15%2B-3776AB?style=flat-square&logo=python&logoColor=FFD43B" />
   </a>
   <a href="https://doc.qt.io/qtforpython-6/">
-    <img alt="PySide6" src="https://img.shields.io/badge/PySide6-41CD52?style=flat-square&logo=qt&logoColor=white" />
+    <img alt="PySide6" src="https://img.shields.io/badge/PySide6-6.12-41CD52?style=flat-square&logo=qt&logoColor=white" />
   </a>
   <a href="https://pillow.readthedocs.io/en/stable/">
-    <img alt="Pillow" src="https://img.shields.io/badge/Pillow-8A2BE2?style=flat-square&logo=python&logoColor=white" />
+    <img alt="Pillow" src="https://img.shields.io/badge/Pillow-12.3-8A2BE2?style=flat-square&logo=pillow&logoColor=white" />
   </a>
   <a href="https://en.wikipedia.org/wiki/Cross-platform_software">
     <img alt="Cross Platform" src="https://img.shields.io/badge/Cross--Platform-00A3E0?style=flat-square&logo=windows&logoColor=white" />
@@ -20,6 +20,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Mitra-88/MetalSlugFontReborn/actions/workflows/build.yml">
+    <img alt="Build" src="https://img.shields.io/github/actions/workflow/status/Mitra-88/MetalSlugFontReborn/build.yml?branch=Development&label=Build&color=10B981&style=flat-square" />
+  </a>
+  <a href="https://github.com/Mitra-88/MetalSlugFontReborn">
+    <img alt="Repo Size" src="https://img.shields.io/github/repo-size/Mitra-88/MetalSlugFontReborn?color=64748B&style=flat-square" />
+  </a>
   <a href="https://github.com/Mitra-88/MetalSlugFontReborn/graphs/contributors">
     <img alt="Contributors" src="https://img.shields.io/github/contributors/Mitra-88/MetalSlugFontReborn?color=22C55E&style=flat-square" />
   </a>
