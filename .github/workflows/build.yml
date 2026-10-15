@@ -169,11 +169,14 @@ jobs:
       - name: Headless smoke test
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libxkbcommon-x11-0 x11-utils xvfb xdotool
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 x11-utils xvfb xdotool openbox
           cd dist/MetalSlugFontReborn
           ulimit -c unlimited
           Xvfb :99 -screen 0 1024x768x24 &
           XVFB_PID=$!
+          sleep 2
+          DISPLAY=:99 openbox &
+          OPENBOX_PID=$!
           sleep 2
           DISPLAY=:99 QT_LOGGING_RULES="*.debug=true" PYTHONFAULTHANDLER=1 ./MetalSlugFontReborn > smoke-app.log 2>&1 &
           APP_PID=$!
@@ -237,6 +240,7 @@ jobs:
             exit 1
           fi
           kill "$APP_PID" 2>/dev/null || true
+          kill "$OPENBOX_PID" 2>/dev/null || true
           kill "$XVFB_PID" 2>/dev/null || true
           echo "smoke test passed: window found, HELLO typed, process alive"
 
