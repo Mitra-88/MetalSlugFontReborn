@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from time import time
 
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.2.1"
 
 WINDOWS_REGISTRY_PATH = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
 WINDOWS_REGISTRY_VALUES = (
