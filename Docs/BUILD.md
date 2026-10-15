@@ -85,12 +85,12 @@ Remove-Item -Force -ErrorAction SilentlyContinue "dist\MetalSlugFontReborn\_inte
 
 You will need the following dependencies on Ubuntu/Debian:
 ```sh
-sudo apt install -y python3 libxcb-cursor0 libxkbcommon0
+sudo apt install -y python3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxcb-render-util0 libxcb-image0 libxcb-shape0 libxcb-randr0 libxkbcommon0 libxkbcommon-x11-0 libegl1
 ```
-`libxcb-cursor0` and `libxkbcommon0` are also required at runtime by the packaged
-build, which uses the xcb backend on Linux so the window manager provides a
-title bar, resizing and a close button. The bundle deliberately does not ship
-its own `libxkbcommon`, so the system copy is always used.
+`libxcb-cursor0`, the xcb utility libraries and `libxkbcommon` are also required at
+runtime by the packaged build, which uses the xcb backend on Linux so the window
+manager provides a title bar, resizing and a close button. The bundle deliberately
+does not ship its own core X11 libraries, so the system copies are always used.
 On Fedora:
 ```sh
 sudo dnf install -y python3 xcb-util-cursor
