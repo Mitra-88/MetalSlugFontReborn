@@ -189,9 +189,13 @@ jobs:
           rm -f pillow.libs/libwebp* pillow.libs/libsharpyuv* pillow.libs/liblcms2*
           for f in pillow.libs/*.so*; do b=$(basename "$f"); if [ -L "$b" ]; then rm -f "$b"; fi; done
           for f in PySide6/Qt/lib/*.so*; do b=$(basename "$f"); if [ -L "$b" ]; then rm -f "$b"; fi; done
-          rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon* libX11* libXau* libXdmcp* libxcb* PySide6/Qt/lib/libX11* PySide6/Qt/lib/libxcb.so.*
-          if find . -maxdepth 1 \( -name 'libxkbcommon*' -o -name 'libX11*' -o -name 'libXau*' -o -name 'libXdmcp*' -o -name 'libxcb*' \) | grep -q .; then
-            echo "::error::bundled X11 stack found: these libraries must come from the user's system"
+          rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon* libX11* libXau* libXdmcp* libxcb.so.* PySide6/Qt/lib/libX11* PySide6/Qt/lib/libxcb.so.*
+          if find . -maxdepth 1 \( -name 'libxkbcommon*' -o -name 'libX11*' -o -name 'libXau*' -o -name 'libXdmcp*' -o -name 'libxcb.so.*' \) | grep -q .; then
+            echo "::error::bundled core X11 stack found: these libraries must come from the user's system"
+            exit 1
+          fi
+          if ! find . -maxdepth 1 -name 'libxcb-cursor*' | grep -q .; then
+            echo "::error::libxcb-cursor not bundled: the xcb plugin needs it and users may not have it installed"
             exit 1
           fi
           if find PySide6/Qt/lib -name 'libX11*' -o -name 'libxkbcommon*' -o -name 'libxcb.so.*' | grep -q .; then
