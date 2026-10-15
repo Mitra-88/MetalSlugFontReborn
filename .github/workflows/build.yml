@@ -78,14 +78,6 @@ jobs:
           find PySide6/plugins/imageformats -type f ! -name "*qico*" -delete
           rm -f PIL/_avif*.pyd
 
-      - name: Strip binaries
-        run: |
-          $strip = (Get-Command llvm-strip -ErrorAction SilentlyContinue).Source
-          if (-not $strip) { $strip = "C:\Program Files\LLVM\bin\llvm-strip.exe" }
-          Get-ChildItem "dist\MetalSlugFontReborn" -Recurse -Include *.dll,*.pyd | ForEach-Object {
-            & $strip --strip-all "$($_.FullName)" 2>$null
-          }
-
       - name: Move Assets
         run: |
           mv dist/MetalSlugFontReborn/_internal/Assets dist/MetalSlugFontReborn/
@@ -168,7 +160,7 @@ jobs:
           find PySide6/Qt/plugins/imageformats -type f ! -name "*qico*" -delete
           rm -f PySide6/Qt/plugins/platformthemes/libqgtk3.so
           rm -f libgtk-3* libgdk-3* libgdk_pixbuf* libpango* libatk* libcairo* libpixman* libgobject* libgio*
-          rm -f PIL/_avif* pillow.libs/libavif* libavif*
+          rm -f PIL/_avif* pillow.libs/libavif* libavif* libgssapi_krb5* libkrb5* libk5crypto* libcom_err* libkeyutils*
           for f in PySide6/Qt/lib/*.so*; do b=$(basename "$f"); if [ -L "$b" ]; then rm -f "$b"; fi; done
           rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon* libX11* libXau* libXdmcp* libxcb* PySide6/Qt/lib/libX11* PySide6/Qt/lib/libxcb.so.*
           if find . -maxdepth 1 \( -name 'libxkbcommon*' -o -name 'libX11*' -o -name 'libXau*' -o -name 'libXdmcp*' -o -name 'libxcb*' \) | grep -q .; then
@@ -275,6 +267,7 @@ jobs:
           kill "$APP_PID" 2>/dev/null || true
           kill "$OPENBOX_PID" 2>/dev/null || true
           kill "$XVFB_PID" 2>/dev/null || true
+          rm -f config.toml smoke-app.log core smoke-core
           echo "smoke test passed: window focused, HELLO typed, title counts 5 characters, process alive"
 
       - name: Upload artifact
@@ -339,7 +332,8 @@ jobs:
           rm -rf PySide6/Qt/translations PySide6/Qt/plugins/tls PySide6/Qt/plugins/networkinformation PySide6/Qt/plugins/generic PySide6/Qt/plugins/iconengines
           rm -f PySide6/Qt/lib/libQt6Network* PySide6/Qt/lib/libQt6Svg* PySide6/Qt/lib/libQt6OpenGL* PySide6/Qt/lib/libQt6DBus* PySide6/Qt/lib/libcrypto* PySide6/Qt/lib/libssl*
           find PySide6/plugins/imageformats PySide6/Qt/plugins/imageformats -type f ! -name "*qico*" -delete 2>/dev/null || true
-          rm -f PIL/_avif*
+          rm -f PIL/_avif* libavif*
+          rm -rf PySide6/Qt/lib/QtNetwork.framework PySide6/Qt/lib/QtSvg.framework PySide6/Qt/lib/QtDBus.framework
 
       - name: Move Assets
         run: |
