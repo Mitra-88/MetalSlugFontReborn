@@ -47,6 +47,8 @@ Enable **Advanced Mode** under Options, and the Generate button becomes
 **Generate & Edit**. Instead of saving directly, a per-character editor
 opens with the whole canvas laid out for you, Aseprite-style.
 
+![Advanced Editor](Markdown/Editor.png)
+
 ### Character controls
 
 Every character is a sprite you can transform and restyle from the

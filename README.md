@@ -64,6 +64,10 @@ MetalSlugFontReborn is a free, open-source desktop app built with PySide6 and Pi
 
 ![MetalSlugFontRebornShowCase](Docs/Markdown/Showcase.png)
 
+**On Linux (EndeavourOS, KDE Plasma):**
+
+![MetalSlugFontRebornOnLinux](Docs/Markdown/Linux.png)
+
 </div>
 
 ## Table of Contents
