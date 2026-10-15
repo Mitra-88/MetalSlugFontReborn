@@ -169,11 +169,7 @@ jobs:
           rm -f PySide6/Qt/plugins/platformthemes/libqgtk3.so
           rm -f libgtk-3* libgdk-3* libgdk_pixbuf* libpango* libatk* libcairo* libpixman* libgobject* libgio*
           rm -f PIL/_avif* pillow.libs/libavif* libavif*
-          for f in PySide6/Qt/lib/*.so*; do b=$(basename "$f"); if [ -f "$b" ] && cmp -s "$f" "$b"; then rm "$f" && ln -s "../../../$b" "$f"; fi; done
-          echo "--- dedupe debug ---"
-          ls -la PySide6/Qt/lib/libQt6Core.so.6 libQt6Core.so.6 2>&1
-          readlink -f PySide6/Qt/lib/libQt6Core.so.6 2>&1 || true
-          if [ -e PySide6/Qt/lib/libQt6Core.so.6 ]; then echo "core symlink resolves"; else echo "core symlink BROKEN"; fi
+          for f in PySide6/Qt/lib/*.so*; do b=$(basename "$f"); if [ -L "$b" ]; then rm -f "$b"; fi; done
           rm -f libxkbcommon* PySide6/Qt/lib/libxkbcommon* libX11* libXau* libXdmcp* libxcb* PySide6/Qt/lib/libX11* PySide6/Qt/lib/libxcb.so.*
           if find . -maxdepth 1 \( -name 'libxkbcommon*' -o -name 'libX11*' -o -name 'libXau*' -o -name 'libXdmcp*' -o -name 'libxcb*' \) | grep -q .; then
             echo "::error::bundled X11 stack found: these libraries must come from the user's system"
