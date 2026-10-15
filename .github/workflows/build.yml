@@ -128,7 +128,7 @@ jobs:
       - name: Install xcb libraries for bundling
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxcb-render-util0 libxcb-image0 libxcb-shape0 libxcb-randr0
+          sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxcb-render-util0 libxcb-image0 libxcb-shape0 libxcb-randr0 libxcb-xkb1
 
       - name: Build rotation library
         run: |
@@ -138,6 +138,14 @@ jobs:
       - name: Build with PyInstaller
         run: |
           pyinstaller --noconfirm --onedir --windowed --strip --name "MetalSlugFontReborn" --clean --optimize "2" --add-data "Src/build_commit.txt:." --add-data "LICENSE:." --add-data "Assets:Assets/" --add-binary "rust/rotsprite-rs/target/release/libmsfr_rotsprite.so:."  "Src/main.py"
+
+      - name: Upload PyInstaller warnings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: pyinstaller-warnings-linux
+          path: build/MetalSlugFontReborn/warn-MetalSlugFontReborn.txt
+          if-no-files-found: ignore
 
       - name: Trim unused Qt components
         run: |
