@@ -1,6 +1,6 @@
 # **Linux:**
 
-**Requirements:** the system X11 stack: `libxkbcommon` and the xcb utility libraries (icccm, keysyms, xinerama, render-util, image, shape, randr, cursor), plus OpenGL/EGL. Every desktop install has these; on Debian/Ubuntu: `sudo apt install libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxcb-render-util0 libxcb-image0 libxcb-shape0 libxcb-randr0 libegl1`.
+**Requirements:** a desktop's standard X11 stack (`libX11`, `libxcb`, `libxkbcommon`) and OpenGL/EGL. Every desktop install has these; the xcb utility libraries the app needs (icccm, keysyms, xinerama, render-util, image, shape, randr, cursor) ship inside the download.
 
 1. Get the latest release of [MetalSlugFontReborn](https://github.com/Mitra-88/MetalSlugFontReborn/releases/latest).
 

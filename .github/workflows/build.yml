@@ -125,6 +125,11 @@ jobs:
       - name: Write build commit
         run: git rev-parse --short HEAD > Src/build_commit.txt
 
+      - name: Install xcb libraries for bundling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxcb-render-util0 libxcb-image0 libxcb-shape0 libxcb-randr0
+
       - name: Build rotation library
         run: |
           rustup update stable
@@ -164,7 +169,7 @@ jobs:
       - name: Headless smoke test
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxcb-render-util0 libxcb-image0 libxcb-shape0 libxcb-randr0 xvfb xdotool
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 xvfb xdotool
           cd dist/MetalSlugFontReborn
           ulimit -c unlimited
           Xvfb :99 -screen 0 1024x768x24 &
