@@ -12,10 +12,16 @@
     <img alt="PySide6" src="https://img.shields.io/badge/PySide6-6.12-41CD52?style=flat-square&logo=qt&logoColor=white" />
   </a>
   <a href="https://pillow.readthedocs.io/en/stable/">
-    <img alt="Pillow" src="https://img.shields.io/badge/Pillow-12.3-8A2BE2?style=flat-square&logo=pillow&logoColor=white" />
+    <img alt="Pillow" src="https://img.shields.io/badge/Pillow-13.0-8A2BE2?style=flat-square&logo=pillow&logoColor=white" />
   </a>
   <a href="https://en.wikipedia.org/wiki/Cross-platform_software">
-    <img alt="Cross Platform" src="https://img.shields.io/badge/Cross--Platform-00A3E0?style=flat-square&logo=windows&logoColor=white" />
+    <img alt="Windows 11" src="https://img.shields.io/badge/Windows_11-0078D4?style=flat-square&logo=windows11&logoColor=white" />
+  </a>
+  <a href="https://en.wikipedia.org/wiki/Cross-platform_software">
+    <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black" />
+  </a>
+  <a href="https://en.wikipedia.org/wiki/Cross-platform_software">
+    <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white" />
   </a>
 </p>
 
@@ -63,8 +69,6 @@
 MetalSlugFontReborn is a free, open-source desktop app built with PySide6 and Pillow that generates images from text using sprite-based fonts extracted from the Metal Slug series. It supports multiple font styles, color variations, live previews, line wrapping, compression options.
 
 ![MetalSlugFontRebornShowCase](Docs/Markdown/Showcase.png)
-
-**On Linux (EndeavourOS, KDE Plasma):**
 
 ![MetalSlugFontRebornOnLinux](Docs/Markdown/Linux.png)
 

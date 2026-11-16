@@ -296,6 +296,9 @@ def build_about_dialog(parent=None):
 
     about_layout.addWidget(create_group("System Information:", system_layout))
     about_layout.addStretch()
+    credit = QLabel("Made with ❤️ by Mitra-88")
+    credit.setAlignment(Qt.AlignCenter)
+    about_layout.addWidget(credit)
     tab_widget.addTab(about_tab, "About")
 
     license_tab = QWidget()
