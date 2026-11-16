@@ -395,6 +395,42 @@ def build_supported_characters_markdown():
     return "\n".join(lines)
 
 
+def describe_numbers_range(chars):
+    digits = sorted(int(ch) for ch in chars if ch.isdigit())
+    if not digits:
+        return "None"
+    if digits == list(range(digits[0], digits[-1] + 1)):
+        return f"{digits[0]} to {digits[-1]}"
+    return " ".join(str(d) for d in digits)
+
+
+def join_colors(colors):
+    if len(colors) <= 1:
+        return "".join(colors)
+    return ", ".join(colors[:-1]) + f" and {colors[-1]}"
+
+
+def build_supported_document_markdown():
+    lines = [
+        "# MetalSlugFontReborn Character Support",
+        "",
+        "Here you can find which characters MetalSlugFontReborn supports.",
+    ]
+    for font in get_font_ids():
+        chars = get_font_charset(font)
+        symbols = sorted(ch for ch in chars if not ch.isalnum() and ch not in " \n")
+        lines += [
+            "",
+            f"## Font {font} Support",
+            "",
+            f"- **Letters:** {describe_letter_case(chars)}",
+            f"- **Numbers:** {describe_numbers_range(chars)}",
+            f"- **Symbols:** {' '.join(symbols) or 'None'}",
+            f"- **Colors:** {join_colors(get_font_colors(font))}",
+        ]
+    return "\n".join(lines)
+
+
 class SupportedCharactersDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)

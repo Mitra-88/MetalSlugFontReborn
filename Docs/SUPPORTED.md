@@ -6,28 +6,28 @@ Here you can find which characters MetalSlugFontReborn supports.
 
 - **Letters:** Lowercase and Uppercase
 - **Numbers:** 0 to 9
-- **Symbols:** , * {} () ^ : $ = ! > - ∞ < # % . + & ? " ; / ~ _ | ¥ ⛶ © ♥ ▲ ▼ ◀ ▶ ⋆ ★ ☞ ✖
-- **Colors:** Blue, Orange and Gold
+- **Symbols:** ! " # $ % & ' ( ) * + , - . / : ; < = > ? [ ] ^ _ { | } ~ ¥ © ∞ ⋆ ▲ ▶ ▼ ◀ ★ ☞ ♥ ⛶ ✖
+- **Colors:** Blue, Gold and Orange
 
 ## Font 2 Support
 
 - **Letters:** Lowercase and Uppercase
 - **Numbers:** 0 to 9
-- **Symbols:** , = ︷ ! - . + & ? / ♪ ✖
-- **Colors:** Blue, Orange and Gold
+- **Symbols:** ! & + , - . / = ? ♪ ✖ ︷
+- **Colors:** Blue, Gold and Orange
 
 ## Font 3 Support
 
 - **Letters:** Lowercase and Uppercase
 - **Numbers:** 0 to 9
-- **Symbols:** ' {} () : , = ! > - < . + ? " ; / _ | ¥ ⛶ © ♥ ▲ ▼ ◀ ▶ ✖
+- **Symbols:** ! " # $ % & ' ( ) * + , - . / : ; < = > ? [ ] ^ _ { | } ~ ¥ © ▲ ▶ ▼ ◀ ♥ ⛶ ✖
 - **Colors:** Blue and Orange
 
 ## Font 4 Support
 
 - **Letters:** Lowercase and Uppercase
 - **Numbers:** 0 to 9
-- **Symbols:** ' * {} () ^ : $ = ! > - < # % . + & ? " ; / ~ _ ¥ ⛶ © ♥ ▲ ▼ ◀ ▶ | ✖
+- **Symbols:** ! " # $ % & ' ( ) * + , - . / : ; < = > ? [ ] ^ _ { | } ~ ¥ © ▲ ▶ ▼ ◀ ♥ ⛶ ✖
 - **Colors:** Blue, Orange and Yellow
 
 ## Font 5 Support
