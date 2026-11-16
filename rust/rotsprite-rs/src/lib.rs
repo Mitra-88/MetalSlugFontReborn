@@ -199,7 +199,7 @@ fn ce_slice_dist(
     dd: CeColour,
     ddf: CeColour,
 ) -> Option<CeColour> {
-    let line_width = CLEANEDGE_LINE_WIDTH.max(0.45f64).min(1.142f64);
+    let line_width = CLEANEDGE_LINE_WIDTH.clamp(0.45, 1.142);
     let point = (
         main_dir.0 * (point.0 - 0.5) + 0.5,
         main_dir.1 * (point.1 - 0.5) + 0.5,
@@ -1272,7 +1272,7 @@ mod tests {
         ];
         let (q90, qw, qh) = quarter_turn_cw(&src, w, h);
         let (q180, rw, rh) = quarter_turn_cw(&q90, qw, qh);
-        let (q270, _, _) = quarter_turn_cw(&q180, rw, rh);
+        let (q270, ..) = quarter_turn_cw(&q180, rw, rh);
         let expected = [src.clone(), q90, q180, q270];
         for (i, ((dw, dh), corners)) in cases.iter().enumerate() {
             let out = parallelogram(&src, w, h, *dw, *dh, corners);

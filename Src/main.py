@@ -1,3 +1,4 @@
+import ctypes
 import platform
 import sys
 from os import environ
@@ -504,8 +505,6 @@ class MainWindow(QMainWindow):
             return
         dark = QApplication.palette().color(QPalette.ColorRole.Window).lightness() < 128
         try:
-            import ctypes
-
             hwnd = int(self.winId())
             value = ctypes.c_int(1 if dark else 0)
             for attribute in (20, 19):
@@ -1508,8 +1507,6 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     if platform.system() == "Windows":
-        import ctypes
-
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
             "Mitra88.MetalSlugFontReborn"
         )
@@ -1524,8 +1521,6 @@ if __name__ == "__main__":
     if plugin_hint:
         print(plugin_hint, file=sys.stderr)
         if platform.system() == "Windows":
-            import ctypes
-
             ctypes.windll.user32.MessageBoxW(
                 None, plugin_hint, "MetalSlugFontReborn", 0x10
             )
