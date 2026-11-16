@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import platform
+import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -40,9 +41,12 @@ def _git_commit():
             return commit_file.read_text(encoding="utf-8").strip() or "release"
         except OSError:
             return "release"
+    git = shutil.which("git")
+    if git is None:
+        return "dev"
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            [git, "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
             timeout=5,

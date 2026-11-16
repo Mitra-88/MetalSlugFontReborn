@@ -218,9 +218,8 @@ class MainWindow(QMainWindow):
 
     def _update_hue_preview(self, value):
         if self._base_color is not None:
-            fill = "#{:02x}{:02x}{:02x}".format(
-                *self._rotate_hue(self._base_color, value)
-            )
+            rotated = self._rotate_hue(self._base_color, value)
+            fill = f"#{rotated[0]:02x}{rotated[1]:02x}{rotated[2]:02x}"
         elif self._base_hue is not None:
             fill = QColor.fromHsv(self._base_hue, 255, 255).name()
         else:
@@ -346,8 +345,8 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _style_swatch(button, source_rgb, fill_rgb):
-        fill = "#{:02x}{:02x}{:02x}".format(*fill_rgb)
-        border = "#{:02x}{:02x}{:02x}".format(*source_rgb)
+        fill = f"#{fill_rgb[0]:02x}{fill_rgb[1]:02x}{fill_rgb[2]:02x}"
+        border = f"#{source_rgb[0]:02x}{source_rgb[1]:02x}{source_rgb[2]:02x}"
         button.setStyleSheet(
             f"QPushButton {{ background-color: {fill}; border: 1px solid {border}; "
             f"border-radius: 4px; }}"

@@ -1976,7 +1976,9 @@ def test_editor_save_prompt_offers_folder_and_remembers(qapp, tmp_path, monkeypa
     dialog = make_dialog(tmp_path)
     try:
         dialog._prompt_save_location = (
-            editor_module.AdvancedEditorDialog._prompt_save_location.__get__(dialog)
+            editor_module.AdvancedEditorDialog._prompt_save_location.__get__(
+                dialog, type(dialog)
+            )
         )
         saved = []
         monkeypatch.setattr(
@@ -2016,7 +2018,9 @@ def test_editor_save_prompt_respects_skip_flag(qapp, tmp_path, monkeypatch):
     dialog = make_dialog(tmp_path)
     try:
         dialog._prompt_save_location = (
-            editor_module.AdvancedEditorDialog._prompt_save_location.__get__(dialog)
+            editor_module.AdvancedEditorDialog._prompt_save_location.__get__(
+                dialog, type(dialog)
+            )
         )
         monkeypatch.setattr(
             editor_module, "load_config", lambda key, fallback=False: True

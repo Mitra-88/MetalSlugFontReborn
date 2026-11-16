@@ -189,7 +189,8 @@ def test_about_dialog_lazy_loads_license_and_is_wide(qapp, tmp_path):
 def test_markdown_separates_symbols_for_readability():
     markdown = build_supported_characters_markdown()
     line = next(
-        line for line in markdown.splitlines() if line.startswith("- **Symbols:**")
+        (line for line in markdown.splitlines() if line.startswith("- **Symbols:**")),
+        "",
     )
     assert "`" in line
     assert "` `" in line

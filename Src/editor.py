@@ -4,6 +4,7 @@ import queue
 import threading
 from enum import IntEnum
 from math import atan2, ceil, cos, degrees, floor, radians, sin
+from operator import methodcaller
 from pathlib import Path
 from time import time
 
@@ -274,7 +275,7 @@ class SnapEngine:
     def _match_edges(self, moving, table, threshold, style, horizontal):
         out = []
         for edge in moving:
-            for coord, key in table:
+            for coord, _ in table:
                 delta = coord - edge
                 if abs(delta) <= threshold:
                     out.append(
@@ -286,14 +287,14 @@ class SnapEngine:
         if horizontal:
             first, span = box.left(), box.width()
             perp_lo, perp_hi = box.top(), box.bottom()
-            left_edge_of = lambda r: r.right()
-            right_edge_of = lambda r: r.left()
+            left_edge_of = methodcaller("right")
+            right_edge_of = methodcaller("left")
             before, after = self._x_by_right, self._x_by_left
         else:
             first, span = box.top(), box.height()
             perp_lo, perp_hi = box.left(), box.right()
-            left_edge_of = lambda r: r.bottom()
-            right_edge_of = lambda r: r.top()
+            left_edge_of = methodcaller("bottom")
+            right_edge_of = methodcaller("top")
             before, after = self._y_by_bottom, self._y_by_top
 
         near_left = self._nearest_before(
@@ -405,8 +406,8 @@ def apply_adjustments(image, brightness=1.0, saturation=1.0, contrast=1.0):
     return merged
 
 
-def shift_sprite_hue(sprite, degrees):
-    if not degrees % 360:
+def shift_sprite_hue(sprite, hue_degrees):
+    if not hue_degrees % 360:
         return sprite
     mapping = {}
     for _count, color in sprite.getcolors(1 << 20) or []:
@@ -416,7 +417,7 @@ def shift_sprite_hue(sprite, degrees):
         )
         if sat < HUE_NEUTRAL_SATURATION:
             continue
-        r, g, b = colorsys.hsv_to_rgb((hue + degrees / 360.0) % 1.0, sat, val)
+        r, g, b = colorsys.hsv_to_rgb((hue + hue_degrees / 360.0) % 1.0, sat, val)
         mapping[rgb] = (round(r * 255), round(g * 255), round(b * 255))
     if not mapping:
         return sprite
@@ -1727,7 +1728,7 @@ class EditorScene(QGraphicsScene):
         item.setSelected(True)
         dialog = self.parent_dialog
         menu = QMenu()
-        menu.addAction("Duplicate", lambda: dialog._duplicate_selection())
+        menu.addAction("Duplicate", dialog._duplicate_selection)
         menu.addAction("Reset Scale", lambda: dialog._reset_item(item, "scale_pct"))
         menu.addAction("Reset Rotation", lambda: dialog._reset_item(item, "rotation"))
         menu.addAction(

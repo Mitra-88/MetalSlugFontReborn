@@ -80,7 +80,7 @@ def test_per_color_charset_matches_union():
             base = FONTS_BASE_DIR / f"Font-{font}" / f"MS-{color}"
             chars = {" ", "\n"}
 
-            def add(directory, mapper, chars=chars):
+            def add(directory, mapper, chars):
                 if not directory.is_dir():
                     return
                 for entry in directory.iterdir():
@@ -91,16 +91,19 @@ def test_per_color_charset_matches_union():
             add(
                 base / "Letters" / "Lower-Case",
                 lambda stem: stem if len(stem) == 1 and stem.islower() else None,
+                chars,
             )
             add(
                 base / "Letters" / "Upper-Case",
                 lambda stem: stem if len(stem) == 1 and stem.isupper() else None,
+                chars,
             )
             add(
                 base / "Numbers",
                 lambda stem: stem if len(stem) == 1 and stem.isdigit() else None,
+                chars,
             )
-            add(base / "Symbols", inverse.get)
+            add(base / "Symbols", inverse.get, chars)
             assert frozenset(chars) == union, (font, color)
 
 

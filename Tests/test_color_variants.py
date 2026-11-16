@@ -268,7 +268,7 @@ def test_swatch_preview_shows_adjusted_color(qapp, tmp_path):
         mapped = hue_shift((176, 184, 224), (base_hue + 120) % 360)
         window.adjustment_sliders["brightness"].setValue(50)
         shown = adjust_color(mapped, 0.5, 1.0, 1.0)
-        fill = "#{:02x}{:02x}{:02x}".format(*shown)
+        fill = f"#{shown[0]:02x}{shown[1]:02x}{shown[2]:02x}"
         assert f"background-color: {fill}" in blue_shade_button.styleSheet()
     finally:
         window.close()
