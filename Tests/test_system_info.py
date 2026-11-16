@@ -1,4 +1,7 @@
 import re
+from pathlib import Path
+
+from make_versionfile import version_file_text
 
 from system_info import (
     APP_VERSION,
@@ -9,6 +12,13 @@ from system_info import (
     normalize_architecture,
     readable_size,
 )
+
+
+def test_version_holders_agree_with_app_version():
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "versionfile.txt").read_text(encoding="utf-8") == version_file_text()
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert re.search(rf'^version = "{re.escape(APP_VERSION)}"$', pyproject, re.MULTILINE)
 
 
 def test_version_embeds_a_stable_commit_identifier():

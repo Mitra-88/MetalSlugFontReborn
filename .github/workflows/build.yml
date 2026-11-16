@@ -76,6 +76,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
+          python Tools/make_versionfile.py
           pyinstaller --noconfirm --onedir --windowed --icon "Assets/Icons/Raubtier.ico" --name "MetalSlugFontReborn" --clean --optimize "2" --version-file "versionfile.txt" --add-data "Src/build_commit.txt;." --add-data "LICENSE;." --add-data "Assets;Assets/" --add-binary "rust/rotsprite-rs/target/release/msfr_rotsprite.dll;."  "Src/main.py"
 
       - name: Trim unused Qt components
@@ -89,6 +90,7 @@ jobs:
           rm -f PySide6/QtNetwork.pyd PySide6/QtDBus.pyd PIL/_imagingtk*.pyd PIL/ImageTk.py PIL/AvfImagePlugin.py PIL/Jpeg2KImagePlugin.py
           rm -f PySide6/plugins/platforms/qdirect2d.dll
           rm -f PIL/_webp*.pyd PIL/_imagingcms*.pyd PIL/_imagingmath*.pyd
+          rm -f ucrtbase.dll api-ms-win-crt-*.dll
 
       - name: Move Assets
         run: |
