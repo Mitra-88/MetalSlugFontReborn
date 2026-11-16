@@ -62,8 +62,9 @@ from image_generation import (
     get_font_paths,
     layout_characters,
 )
-from rotsprite import QUALITY_FAST_ROTSPRITE, QUALITY_ROTSPRITE
+from rotsprite import QUALITY_CLEANEDGE as QUALITY_CLEANEDGE_ROTATION
 from rotsprite import QUALITY_NEAREST as QUALITY_NEAREST_ROTATION
+from rotsprite import QUALITY_ROTSPRITE
 from rotsprite import rotate as rotsprite_rotate
 from system_info import readable_size
 from ui_common import load_config, open_supported_characters, save_config
@@ -441,7 +442,7 @@ def render_character(
     sprite,
     scale_pct=CHAR_SCALE_DEFAULT,
     rotation=0,
-    quality=QUALITY_FAST_ROTSPRITE,
+    quality=QUALITY_ROTSPRITE,
     stretch_x=CHAR_SCALE_DEFAULT,
     stretch_y=CHAR_SCALE_DEFAULT,
     flip_h=False,
@@ -590,7 +591,8 @@ class CharItem(QGraphicsPixmapItem):
         self._pix_cache = {}
         self._hue_cache = {}
         self._pending_center = None
-        self.rotation_quality = QUALITY_FAST_ROTSPRITE
+        self._pixmap_scale = self.scale_pct
+        self.rotation_quality = QUALITY_ROTSPRITE
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
@@ -721,6 +723,10 @@ class CharItem(QGraphicsPixmapItem):
         if rendered is not None:
             self._pix_cache[key] = rendered
 
+    def _set_pixmap(self, pixmap):
+        self.setPixmap(pixmap)
+        self._pixmap_scale = self.scale_pct
+
     def update_pixmap(self):
         key = self._cache_key()
         rendered = self._pix_cache.get(key)
@@ -731,7 +737,7 @@ class CharItem(QGraphicsPixmapItem):
             if self._dispatcher is not None and (
                 self.rotation % 90 or appearance_pending
             ):
-                self.setPixmap(
+                self._set_pixmap(
                     QPixmap.fromImage(
                         ImageQt.ImageQt(
                             render_character(
@@ -767,7 +773,7 @@ class CharItem(QGraphicsPixmapItem):
                 self._pix_cache.clear()
             self._pix_cache[key] = rendered
         qimage = ImageQt.ImageQt(rendered)
-        self.setPixmap(QPixmap.fromImage(qimage))
+        self._set_pixmap(QPixmap.fromImage(qimage))
         self._after_pixmap_change()
 
     def request_render(self):
@@ -775,7 +781,7 @@ class CharItem(QGraphicsPixmapItem):
         rendered = self._pix_cache.get(key)
         if rendered is not None:
             self._pending_center = None
-            self.setPixmap(QPixmap.fromImage(ImageQt.ImageQt(rendered)))
+            self._set_pixmap(QPixmap.fromImage(ImageQt.ImageQt(rendered)))
             self._after_pixmap_change()
             return
         if self._dispatcher is not None:
@@ -791,7 +797,7 @@ class CharItem(QGraphicsPixmapItem):
         self._pix_cache[key] = rendered
         if key != self._cache_key():
             return
-        self.setPixmap(QPixmap.fromImage(ImageQt.ImageQt(rendered)))
+        self._set_pixmap(QPixmap.fromImage(ImageQt.ImageQt(rendered)))
         scene = self.scene()
         dialog = scene.parent_dialog if scene is not None else None
         if dialog is None or (
@@ -860,7 +866,7 @@ def _state_size(item, state):
     cached = item._pix_cache.get(item._cache_key())
     if cached is not None and scale == item.scale_pct:
         return cached.size
-    ratio = scale / (item.scale_pct or scale)
+    ratio = scale / (item._pixmap_scale or scale)
     pixmap = item.pixmap()
     return pixmap.width() * ratio, pixmap.height() * ratio
 
@@ -2502,16 +2508,17 @@ undoable.</li>
         self.rotation_quality = QComboBox()
         self.rotation_quality.addItems(
             [
-                QUALITY_FAST_ROTSPRITE,
                 QUALITY_ROTSPRITE,
+                QUALITY_CLEANEDGE_ROTATION,
                 QUALITY_NEAREST_ROTATION,
             ]
         )
         self.rotation_quality.setToolTip(
-            "RotSprite and Fast RotSprite keep sharp pixel edges when "
-            "rotating; Nearest is the classic jagged method. Rotations in "
-            "multiples of 90 degrees are always pixel-exact. Higher quality "
-            "is slower on large images."
+            "RotSprite keeps sharp pixel edges when rotating; CleanEdge is a "
+            "shader-based edge cleanup that is not Aseprite; Nearest is the "
+            "classic jagged method. Rotations in multiples of 90 degrees are "
+            "always pixel-exact. RotSprite and CleanEdge are slower on large "
+            "images."
         )
         self.rotation_quality.currentTextChanged.connect(
             self._on_rotation_quality_changed
@@ -3159,7 +3166,11 @@ undoable.</li>
             if item.rotation % 180:
                 w, h = h, w
             return (w, h), True
-        return (item.pixmap().width(), item.pixmap().height()), False
+        ratio = item.scale_pct / (item._pixmap_scale or item.scale_pct)
+        return (
+            item.pixmap().width() * ratio,
+            item.pixmap().height() * ratio,
+        ), False
 
     def _scale_selection(self, items, value):
         baseline = getattr(self, "_slider_undo_before", None) or {}

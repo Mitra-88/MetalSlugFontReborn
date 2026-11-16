@@ -58,7 +58,7 @@ Character Controls panel:
   offset boxes for exact placement.
 - **Scale** - 10% to 400%, uniform, via slider or spin box.
 - **Rotate** - ±180° in 45° steps on a slider, with a rotation
-  quality selector (Fast RotSprite, full RotSprite or Nearest).
+  quality selector (RotSprite, CleanEdge or Nearest).
 - **Stretch** - independent X/Y percentage for squashing or widening
   a character without touching the others.
 - **Flip** - horizontal and vertical flip toggles.

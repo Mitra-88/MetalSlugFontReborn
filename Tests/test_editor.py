@@ -226,18 +226,18 @@ def test_select_all_only_selects_visible(qapp, tmp_path):
 def test_render_character_stretches_per_axis(qapp, tmp_path):
     from PIL import Image
 
-    from editor import QUALITY_FAST_ROTSPRITE, render_character
+    from editor import QUALITY_ROTSPRITE, render_character
 
     sprite = Image.new("RGBA", (10, 6), (255, 0, 0, 255))
-    assert render_character(sprite, 100, 0, QUALITY_FAST_ROTSPRITE, 200, 50).size == (
+    assert render_character(sprite, 100, 0, QUALITY_ROTSPRITE, 200, 50).size == (
         20,
         3,
     )
-    assert render_character(sprite, 150, 0, QUALITY_FAST_ROTSPRITE, 100, 100).size == (
+    assert render_character(sprite, 150, 0, QUALITY_ROTSPRITE, 100, 100).size == (
         15,
         9,
     )
-    assert render_character(sprite, 100, 0, QUALITY_FAST_ROTSPRITE, 100, 100).size == (
+    assert render_character(sprite, 100, 0, QUALITY_ROTSPRITE, 100, 100).size == (
         10,
         6,
     )
@@ -275,18 +275,18 @@ def test_stretch_survives_capture_apply_roundtrip(qapp, tmp_path):
 def test_flip_renders_mirrored_pixels(qapp, tmp_path):
     from PIL import Image
 
-    from editor import QUALITY_FAST_ROTSPRITE, render_character
+    from editor import QUALITY_ROTSPRITE, render_character
 
     sprite = Image.new("RGBA", (3, 1))
     sprite.putpixel((0, 0), (255, 0, 0, 255))
     sprite.putpixel((2, 0), (0, 255, 0, 255))
     out = render_character(
-        sprite, 100, 0, QUALITY_FAST_ROTSPRITE, 100, 100, True, False
+        sprite, 100, 0, QUALITY_ROTSPRITE, 100, 100, True, False
     )
     assert out.getpixel((0, 0)) == (0, 255, 0, 255)
     assert out.getpixel((2, 0)) == (255, 0, 0, 255)
     both = render_character(
-        sprite, 100, 0, QUALITY_FAST_ROTSPRITE, 100, 100, True, True
+        sprite, 100, 0, QUALITY_ROTSPRITE, 100, 100, True, True
     )
     assert both.getpixel((0, 0)) == (0, 255, 0, 255)
 
@@ -766,13 +766,13 @@ def test_scale_slider_positions_use_stretched_size(qapp, tmp_path):
 def test_non_quarter_rotation_renders_clockwise(qapp, tmp_path):
     from PIL import Image
 
-    from editor import QUALITY_FAST_ROTSPRITE, render_character
+    from editor import QUALITY_ROTSPRITE, render_character
 
     sprite = Image.new("RGBA", (20, 20))
     for y in range(8):
         for x in range(8):
             sprite.putpixel((x, y), (255, 0, 0, 255))
-    out = render_character(sprite, 100, 45, QUALITY_FAST_ROTSPRITE)
+    out = render_character(sprite, 100, 45, QUALITY_ROTSPRITE)
     red = [
         (x, y)
         for y in range(out.height)
@@ -1801,6 +1801,62 @@ def test_scale_slider_recenters_rotated_item_on_render(qapp, tmp_path):
         center = item.sceneBoundingRect().center()
         assert abs(center.x() - pending.x()) <= 1
         assert abs(center.y() - pending.y()) <= 1
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_scale_drag_keeps_rotated_item_center_while_renders_pend(
+    qapp, tmp_path
+):
+    from editor import render_character
+
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        item.rotation = 45
+        item.update_pixmap()
+        item._dispatcher = _RecordingDispatcher()
+        center_before = item.sceneBoundingRect().center()
+        dialog._begin_slider_undo()
+        dialog.scale_slider.setValue(150)
+        item.apply_rendered(
+            item.sprite, item._cache_key(), render_character(item.sprite, 150, 45)
+        )
+        for value in (200, 250, 300):
+            dialog.scale_slider.setValue(value)
+        dialog._end_slider_undo()
+        rendered = render_character(item.sprite, 300, 45)
+        item.apply_rendered(item.sprite, item._cache_key(), rendered)
+        center_after = item.sceneBoundingRect().center()
+        assert abs(center_after.x() - center_before.x()) <= 1
+        assert abs(center_after.y() - center_before.y()) <= 1
+    finally:
+        dialog._dirty = False
+        dialog.close()
+
+
+def test_scale_ticks_keep_rotated_item_center_while_renders_pend(
+    qapp, tmp_path
+):
+    from editor import render_character
+
+    dialog = make_dialog(tmp_path)
+    try:
+        item = dialog.items[0]
+        item.setSelected(True)
+        item.rotation = 45
+        item.update_pixmap()
+        item._dispatcher = _RecordingDispatcher()
+        center_before = item.sceneBoundingRect().center()
+        for value in (150, 200, 250, 300):
+            dialog._apply_char_property("scale_pct", value, push=False)
+        rendered = render_character(item.sprite, 300, 45)
+        item.apply_rendered(item.sprite, item._cache_key(), rendered)
+        center_after = item.sceneBoundingRect().center()
+        assert abs(center_after.x() - center_before.x()) <= 1
+        assert abs(center_after.y() - center_before.y()) <= 1
     finally:
         dialog._dirty = False
         dialog.close()
